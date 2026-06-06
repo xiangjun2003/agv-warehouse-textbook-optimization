@@ -1295,7 +1295,7 @@ def plot_route_maps(
         columnspacing=1.0,
     )
     fig.suptitle(
-        f"任务1+动态分区+缓存：全部 {len(snapshots)} 轮滚动处理过程",
+        f"任务1+动态分区+缓存：真实场景订单处理全过程（{len(snapshots)} 轮）",
         fontsize=27,
         fontweight="bold",
         color=COLORS["ink"],
@@ -1341,7 +1341,7 @@ def plot_comparison(comparison_rows: list[dict[str, object]], output: Path) -> N
         ax.spines[["top", "right"]].set_visible(False)
         ax.grid(axis="y")
         ax.tick_params(axis="x", labelrotation=10)
-    fig.suptitle("滚动处理消融实验：分区与缓存的独立影响", fontsize=21, fontweight="bold", y=0.98)
+    fig.suptitle("真实场景订单处理调度实验：分区与缓存的独立影响", fontsize=21, fontweight="bold", y=0.98)
     fig.subplots_adjust(top=0.82, bottom=0.18, left=0.07, right=0.985, wspace=0.25)
     fig.savefig(output, bbox_inches="tight")
     plt.close(fig)
@@ -1580,7 +1580,7 @@ def main() -> None:
         comparison_figure_path=Path(args.comparison_figure),
         verbose=args.verbose,
     )
-    print("Rolling ablation optimization")
+    print("Realistic order-processing scheduling experiment")
     print(f"scenarios={len(comparison_rows)} route_records={len(route_rows)} time={elapsed:.3f}s")
     for row in comparison_rows:
         print(

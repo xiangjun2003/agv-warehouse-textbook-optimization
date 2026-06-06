@@ -6,13 +6,13 @@ This repository contains a complete AGV warehouse optimization course project.
 It uses local CSV data, automated model-building scripts, and
 self-implemented textbook optimization algorithms to solve three base
 warehouse optimization tasks: AGV assignment, dynamic partitioning, and
-cache/transfer location selection. It also builds a multi-period rolling
-ablation experiment under one fixed initial demand batch.
+cache/transfer location selection. It also builds a realistic order-processing
+scheduling experiment under one fixed initial demand batch.
 
 The README follows the same narrative order as the presentation: background,
-entities and data, base tasks and multi-period experiment meaning, modeling,
-textbook algorithm mapping, experiment setup, result analysis, complete global
-modeling, and limitations.
+entities and data, base tasks and the realistic scheduling experiment,
+modeling, textbook algorithm mapping, experiment setup, result analysis,
+complete global modeling, and limitations.
 
 ## 1. Background, Entities, and Data
 
@@ -23,7 +23,7 @@ processing speed, workstation waiting time, and local congestion.
 
 This project can be understood as a small intelligent warehouse decision
 system. Given a set of pallets, AGVs, and workstations, it answers three
-base operational questions plus one integrated multi-period question:
+base operational questions plus one integrated realistic scheduling question:
 
 - **Who should move the current batch of pallets?** For example, during a
   shipping peak, 12 AGVs may be parked at different locations. Randomly
@@ -45,7 +45,7 @@ base operational questions plus one integrated multi-period question:
   round, and each workstation has limited processing capacity, then single
   dispatch distance is not enough. The system must also track workstation
   queues, cache inventory, and total completion rounds. This corresponds to
-  the **multi-period rolling ablation experiment**.
+  the **realistic order-processing scheduling experiment**.
 
 The practical value of the project is to convert warehouse operations into
 computable, reproducible, and explainable optimization models:
@@ -84,9 +84,9 @@ The project uses the following warehouse entities:
 
 Distance is defined as:
 
-```text
-dist(a, b) = |x_a - x_b| + |y_a - y_b|
-```
+$$
+\operatorname{dist}(a,b)=|x_a-x_b|+|y_a-y_b|
+$$
 
 ### Entity Legend and Visual Annotation Rules
 
@@ -123,10 +123,10 @@ positions, and demand context, and then constructs the optimization models.
 
 | File | Fields | Scale | Real-world meaning | Role in the model |
 | --- | --- | --- | --- | --- |
-| `data/map.csv` | `Type`, `X`, `Y`, `All_Car`, `Free_Car` | 704 map nodes, warehouse size 32 x 22, including 18 workstation nodes with type `5` | warehouse grid, aisles, storage nodes, charging nodes, connection nodes, and workstations | reads warehouse nodes and workstation coordinates; supports Manhattan distance calculation for base tasks and the rolling experiment |
+| `data/map.csv` | `Type`, `X`, `Y`, `All_Car`, `Free_Car` | 704 map nodes, warehouse size 32 x 22, including 18 workstation nodes with type `5` | warehouse grid, aisles, storage nodes, charging nodes, connection nodes, and workstations | reads warehouse nodes and workstation coordinates; supports Manhattan distance calculation for base tasks and the realistic scheduling experiment |
 | `data/pallets.csv` | `{SKU:Amount} List`, `X`, `Y`, `Pallet ID` | 140 pallets, total pallet quantity 8478, single-pallet quantity range 26 to 192 | current pallet inventory and storage distribution | provides pallet coordinates, pallet quantities, and Task 3 candidate locations |
 | `data/bots.csv` | `car_id`, `x`, `y`, `direction` | 50 AGV positions; the default experiment samples 12 AGVs for Task 1 | current vehicle state in the warehouse | provides AGV starting positions; direction is retained but not used by the current distance model |
-| `data/orders.csv` | `Order ID`, `SKU`, `Required Amount`, `Order Received Time`, `Deadline Time` | 675 order records, 181 unique SKUs, total demand 8478 | demand context explaining why inventory needs to be moved and processed | the rolling experiment matches order demand to pallet inventory to form the initial demand batch |
+| `data/orders.csv` | `Order ID`, `SKU`, `Required Amount`, `Order Received Time`, `Deadline Time` | 675 order records, 181 unique SKUs, total demand 8478 | demand context explaining why inventory needs to be moved and processed | the realistic scheduling experiment matches order demand to pallet inventory to form the initial demand batch |
 
 The data relationships are:
 
@@ -154,14 +154,14 @@ Data preprocessing includes:
   seed for a reproducible dispatching batch;
 - building AGV-pallet, pallet-workstation, and pallet-pallet distance matrices.
 
-The base tasks and rolling experiment use the data differently:
+The base tasks and realistic scheduling experiment use the data differently:
 
 | Task | Data used | How the data enter the model |
 | --- | --- | --- |
 | Task 1 AGV assignment | `bots.csv`, `pallets.csv`, `map.csv` | AGV, pallet, and workstation coordinates define the two-stage route cost: `AGV -> pallet -> workstation` |
 | Task 2 dynamic partitioning | `pallets.csv`, `map.csv` | pallet quantities are supply amounts, and pallet-workstation distances are unit assignment costs |
 | Task 3 cache/transfer location selection | `pallets.csv`, `map.csv` | existing pallet/storage coordinates are candidate locations, and pallet-pallet distances define spatial conflict constraints |
-| Multi-period rolling ablation | `orders.csv`, `pallets.csv`, `bots.csv`, `map.csv`, plus Task 2/3 outputs | matches demand to pallets and updates AGV positions, remaining quantities, workstation queues, and cache inventory by round |
+| Realistic order-processing scheduling experiment | `orders.csv`, `pallets.csv`, `bots.csv`, `map.csv`, plus Task 2/3 outputs | matches demand to pallets and updates AGV positions, remaining quantities, workstation queues, and cache inventory by round |
 
 The only randomness in the default experiment is AGV sampling for Task 1. It
 represents the current dispatchable vehicle set. The warehouse map, pallet
@@ -171,7 +171,7 @@ so the experiment is directly reproducible.
 ## 2. Project Content
 
 The project contains three base optimization tasks and one integrated
-multi-period experiment:
+realistic scheduling experiment:
 
 1. **AGV assignment**: decide which AGV serves which pallet and which
    workstation receives it.
@@ -179,20 +179,21 @@ multi-period experiment:
    assigned to each workstation, forming workstation service areas.
 3. **Cache/transfer location selection**: choose important cache or transfer
    positions from candidate storage locations.
-4. **Multi-period rolling ablation**: under one fixed initial demand batch,
+4. **Realistic order-processing scheduling experiment**: under one fixed initial demand batch,
    compare Task 1 only, Task 1 + cache, Task 1 + dynamic partitioning, and Task
    1 + dynamic partitioning + cache by completion rounds and AGV distance.
 
 The first three tasks correspond to daily dispatching, area organization, and
-layout planning. The rolling experiment puts these layers into one process and
-measures how each layer changes total completion time and travel distance.
+layout planning. The realistic scheduling experiment puts these layers into
+one process and measures how each layer changes total completion time and
+travel distance.
 
 ## 3. Automated Modeling and Solving Workflow
 
 The workflow is automated. Running `python run_all.py` solves the three base
 tasks. Running `python solve_multi_period.py` builds the initial order demand
-and executes the multi-period rolling ablation. All outputs are written into
-`results/`.
+and executes the realistic order-processing scheduling experiment. All outputs
+are written into `results/`.
 
 ```text
 CSV data
@@ -216,7 +217,7 @@ solve_warehouse_layout.py      Task 3 model builder and solver
 run_all.py                     one-click entry point for the three base tasks
 results/                       generated CSV outputs
 scripts/make_readme_figures.py README figure generation script
-solve_multi_period.py          rolling ablation experiment under initial total demand
+solve_multi_period.py          realistic order-processing scheduling experiment
 ```
 
 Default problem sizes:
@@ -226,7 +227,7 @@ Default problem sizes:
 | Task 1 | 12 AGVs, 140 pallets, 18 workstations; 4498 LP variables and 450 equality constraints |
 | Task 2 | 140 pallets and 18 workstations; 2538 LP variables and 158 equality constraints |
 | Task 3 | select 10 locations from 140 candidates; 140 continuous relaxation variables and 2165 spatial conflict edges |
-| Multi-period rolling experiment | 140 pallets, 675 orders, 24 AGVs, 18 workstations, and 10 cache points; four ablation settings generate 149 to 197 AGV routes and 10 to 20 rounds under default parameters |
+| Realistic order-processing scheduling experiment | 140 pallets, 675 orders, 24 AGVs, 18 workstations, and 10 cache points; four ablation settings generate 149 to 197 AGV routes and 10 to 20 rounds under default parameters |
 
 ## 4. Task 1: AGV Assignment
 
@@ -267,17 +268,16 @@ pallet -> workstation
 
 Decision variables:
 
-```text
-x(i,j): whether AGV i serves pallet j
-y(j,k): whether pallet j is delivered to workstation k
-```
+- $x_{ij}\in\{0,1\}$: whether AGV $i$ serves pallet $j$;
+- $y_{jk}\in\{0,1\}$: whether pallet $j$ is delivered to workstation $k$.
 
 Objective:
 
-```text
-min sum d(AGV_i, pallet_j) x(i,j)
-  + sum d(pallet_j, workstation_k) y(j,k)
-```
+$$
+\min\quad
+\sum_{i,j} d(\mathrm{AGV}_i,\mathrm{pallet}_j)x_{ij}
++\sum_{j,k} d(\mathrm{pallet}_j,\mathrm{workstation}_k)y_{jk}
+$$
 
 Main constraints:
 
@@ -294,10 +294,13 @@ implementation is in `algorithms/primal_dual_lp.py`.
 
 The solver handles:
 
-```text
-min c^T x
-s.t. A x = b, x >= 0
-```
+$$
+\begin{aligned}
+\min\quad & c^\top x \\
+\mathrm{s.t.}\quad & Ax=b,\\
+& x\ge 0.
+\end{aligned}
+$$
 
 It maintains primal variables `x`, dual variables `y`, and slacks `s`, and uses
 Newton directions to reduce primal residual, dual residual, and complementarity
@@ -335,29 +338,25 @@ minimum workload level.
 
 Decision variable:
 
-```text
-z(j,k): quantity from pallet j assigned to workstation k
-```
+$z_{jk}\ge 0$: quantity from pallet $j$ assigned to workstation $k$.
 
 Parameters:
 
-```text
-q(j): total quantity of pallet j
-d(j,k): Manhattan distance from pallet j to workstation k
-```
+- $q_j$: total quantity of pallet $j$;
+- $d_{jk}$: Manhattan distance from pallet $j$ to workstation $k$.
 
 Objective:
 
-```text
-min sum d(j,k) z(j,k)
-```
+$$
+\min \sum_{j,k} d_{jk}z_{jk}
+$$
 
 Main constraints:
 
-- each pallet's quantity is fully assigned: `sum_k z(j,k) = q(j)`;
+- each pallet's quantity is fully assigned: $\sum_k z_{jk}=q_j$;
 - each workstation receives at least a minimum workload:
-  `sum_j z(j,k) >= alpha * total_quantity / K`;
-- all quantity flows are nonnegative: `z(j,k) >= 0`.
+  $\sum_j z_{jk}\ge \alpha\frac{\sum_j q_j}{K}$;
+- all quantity flows are nonnegative: $z_{jk}\ge 0$.
 
 ### Textbook Algorithm
 
@@ -402,21 +401,19 @@ congestion.
 
 Decision variable:
 
-```text
-x(i) in {0, 1}: whether candidate location i is selected
-```
+$x_i\in\{0,1\}$: whether candidate location $i$ is selected.
 
 Cardinality constraint:
 
-```text
-sum_i x(i) = 10
-```
+$$
+\sum_i x_i=10
+$$
 
 Spacing constraint:
 
-```text
-x(i) + x(j) <= 1, if dist(i,j) <= 6
-```
+$$
+x_i+x_j\le 1,\quad \text{if }\operatorname{dist}(i,j)\le 6
+$$
 
 If two candidate positions are too close, they cannot both be selected. A small
 value term, approximated from pallet quantity, breaks ties in favor of more
@@ -429,9 +426,13 @@ Task 3 uses two textbook algorithms plus an engineering repair step:
 - **Chapter 7 quadratic penalty method** converts equality and inequality
   constraints into a penalized objective:
 
-```text
-min f(x) + rho/2 * (||h(x)||^2 + ||max(g(x), 0)||^2)
-```
+$$
+\min_x\quad
+f(x)+\frac{\rho}{2}
+\left(
+\|h(x)\|_2^2+\|\max(g(x),0)\|_2^2
+\right)
+$$
 
 - **Chapter 6 projected Barzilai-Borwein gradient method** solves each
   penalized subproblem under the box constraint `0 <= x <= 1`. The method takes
@@ -453,17 +454,17 @@ Each row is one selected cache/transfer location. The default result selects 10
 positions, with a minimum pairwise Manhattan distance of 7, satisfying the
 `dist > 6` spacing requirement.
 
-## 7. Multi-Period Rolling Ablation Experiment
+## 7. Realistic Order-Processing Scheduling Experiment
 
-![Rolling ablation comparison](figures/cache_distance_comparison.png)
+![Realistic order-processing scheduling comparison](figures/cache_distance_comparison.png)
 
-![Rolling process with Task 1 + dynamic partitioning + cache](figures/multi_period_rolling_process.png)
+![Realistic order-processing process with Task 1 + dynamic partitioning + cache](figures/multi_period_rolling_process.png)
 
 The first three tasks are single-snapshot models. Task 1 answers which AGV
 should serve which pallet, Task 2 assigns pallet quantities to workstation
 service areas, and Task 3 selects cache/transfer locations. To show how these
-layers work together, `solve_multi_period.py` runs a rolling ablation
-experiment under one fixed initial demand batch.
+layers work together, `solve_multi_period.py` runs a realistic
+order-processing scheduling experiment under one fixed initial demand batch.
 
 The business scenario is that all order demand is already present at time
 `t=0`. The system does not keep releasing new work. AGVs move once per round
@@ -476,7 +477,7 @@ dynamic partitioning can be separated:
 
 | Setting | Added decision layer | Operational meaning | AGV delivery endpoint |
 | --- | --- | --- | --- |
-| Task 1 only | AGV dispatching | choose AGV-pallet-workstation tasks by rolling distance | workstation |
+| Task 1 only | AGV dispatching | choose AGV-pallet-workstation tasks by round-by-round distance | workstation |
 | Task 1 + cache | dispatching + cache points | keep nearest-workstation service, but allow AGVs to use cache points | workstation; cache is only intermediate inventory |
 | Task 1 + dynamic partitioning | dispatching + workstation service areas | Task 2 first assigns each pallet to a primary workstation | assigned workstation |
 | Task 1 + dynamic partitioning + cache | dispatching + service areas + cache state | AGVs may deliver directly, move goods into cache, or replenish workstations from cache | workstation; cache is only intermediate inventory |
@@ -500,14 +501,14 @@ AGV positions, remaining quantities, cache inventory, and cache capacity. Cache
 is preferred only when `pallet -> cache` plus the amortized downstream
 `cache -> workstation` cost is cheaper than direct delivery.
 
-The rolling pipeline is:
+The scheduling pipeline is:
 
 ```text
 read orders.csv and pallets.csv to build the t=0 initial demand
-  -> Setting A: rolling Task 1 dispatching only
+  -> Setting A: round-by-round Task 1 dispatching only
   -> Setting B: Setting A + Task 3 cache points, without dynamic partitioning
-  -> Setting C: Task 2 primary workstation assignment + rolling Task 1 dispatching
-  -> Setting D: Setting C + Task 3 cache points with rolling cache inventory
+  -> Setting C: Task 2 primary workstation assignment + round-by-round Task 1 dispatching
+  -> Setting D: Setting C + Task 3 cache points with cache inventory updates
   -> compare completion rounds, AGV distance, and cache usage
 ```
 
@@ -520,7 +521,7 @@ Default data and parameters:
 - 18 workstations each process at most 80 units per round;
 - Task 3 selects 10 cache points, each with default capacity 600.
 
-The rolling process figure shows the full 11-round process for the fourth
+The process figure shows the full 11-round process for the fourth
 setting:
 
 - blue triangles: AGV starting positions in the current round;
@@ -542,7 +543,7 @@ results/multi_period_workload.csv    planned quantity and planned receiver by pa
 results/multi_period_partition.csv   Task 2 dynamic partitioning result under initial demand
 results/cache_inventory.csv          cache inventory by round
 figures/cache_distance_comparison.png four-setting ablation comparison figure
-figures/multi_period_rolling_process.png rolling process figure for the cache setting
+figures/multi_period_rolling_process.png realistic process figure for the cache setting
 ```
 
 Run:
@@ -569,7 +570,7 @@ Base-task entry point:
 python run_all.py
 ```
 
-Base-task and rolling-experiment entry points:
+Base-task and realistic-experiment entry points:
 
 ```bash
 python solve_agv_assignment.py
@@ -585,7 +586,7 @@ python scripts/make_readme_figures.py
 ```
 
 `scripts/make_readme_figures.py` regenerates the three single-snapshot README
-figures. `solve_multi_period.py` generates the rolling process figure.
+figures. `solve_multi_period.py` generates the realistic process figure.
 
 ## 9. Textbook Chapter and Algorithm Mapping
 
@@ -594,7 +595,7 @@ figures. `solve_multi_period.py` generates the rolling process figure.
 | Task 1 AGV assignment | LP relaxation plus integer recovery | Chapter 7 | primal-dual interior-point method | `algorithms/primal_dual_lp.py` |
 | Task 2 dynamic partitioning | linear programming | Chapter 7 | primal-dual interior-point method | `algorithms/primal_dual_lp.py` |
 | Task 3 cache/transfer location selection | spatially constrained 0-1 selection via continuous relaxation | Chapter 7 + Chapter 6 | quadratic penalty + projected BB gradient + repair | `algorithms/quadratic_penalty.py`, `algorithms/projected_bb_gradient.py` |
-| Multi-period rolling ablation | decomposed rolling completion under initial total demand | Chapter 7 + Chapter 6 | Task 1 dispatch LP + upper-balanced partition LP + primary-workstation repair + Task 3 cache selection + rolling cache inventory updates | `solve_multi_period.py` |
+| Realistic order-processing scheduling experiment | decomposed round-by-round completion under initial total demand | Chapter 7 + Chapter 6 | Task 1 dispatch LP + upper-balanced partition LP + primary-workstation repair + Task 3 cache selection + cache inventory updates by round | `solve_multi_period.py` |
 
 ## 10. Results and Analysis
 
@@ -618,8 +619,8 @@ Interpretation:
 A typical `python solve_multi_period.py` run prints:
 
 ```text
-Rolling ablation optimization
-scenarios=4 route_records=1151 time=1.548s
+Realistic order-processing scheduling experiment
+scenarios=4 route_records=1151 time=1.547s
 [task1_only] rounds=19 agv_routes=149 agv_distance=2899.000 processed=8478.000 cached=0.000
 [task1_cache] rounds=20 agv_routes=197 agv_distance=2226.000 processed=8478.000 cached=5086.000
 [task1_partition] rounds=10 agv_routes=149 agv_distance=3322.000 processed=8478.000 cached=0.000
@@ -628,7 +629,7 @@ cache-only agv-distance saving vs task1=673.000 (23.21%)
 cache agv-distance saving vs partition=262.000 (7.89%)
 ```
 
-The rolling result shows that all demand is fixed at the initial time. With the
+The realistic scheduling result shows that all demand is fixed at the initial time. With the
 default parameters, each workstation can process only 80 units per round. Task
 1 alone sends goods to nearby workstations and keeps AGV distance at 2899, but
 its workload is concentrated: the heaviest workstation processes 1448 units,
@@ -650,16 +651,16 @@ Dynamic partitioning mainly improves workstation load rhythm and completion
 time. In short, cache is more distance-oriented, while partitioning is more
 throughput-oriented.
 
-Together, the task experiments and the rolling ablation show how one warehouse
-dataset can be turned into different optimization models across dispatching,
-service-area organization, and layout planning.
+Together, the task experiments and the realistic scheduling ablation show how
+one warehouse dataset can be turned into different optimization models across
+dispatching, service-area organization, and layout planning.
 
-## 11. Current Rolling Algorithm and Complete Global Model
+## 11. Current Round-by-Round Heuristic and Complete Global Model
 
 ### What the Current Implementation Solves
 
-`solve_multi_period.py` uses a **decomposed rolling heuristic**, not a
-single-shot global optimum for the full multi-period problem. The procedure is:
+`solve_multi_period.py` uses a **decomposed round-by-round heuristic**, not a
+single-shot global optimum for the full cross-round problem. The procedure is:
 
 1. Read `orders.csv` and `pallets.csv` at the initial time and construct total
    demand of `8478` units.
@@ -684,47 +685,44 @@ does not guarantee global optimality.
 ### Complete Global Optimization Model
 
 A rigorous single-shot formulation can be written as a mixed-integer program
-that jointly models dynamic partitioning, cache use, and multi-period AGV
+that jointly models dynamic partitioning, cache use, and multi-round AGV
 scheduling.
 
 Sets and parameters:
 
-```text
-P: pallets, |P| = 140
-S: workstations, |S| = 18
-C0: candidate cache positions, up to 140 pallet/storage coordinates
-m = 10: number of selected cache points
-A: AGVs, |A| = 24
-T: planning rounds, e.g. T = 20 to cover all current ablation settings
-q_p: demand quantity on pallet p
-Q = 120: AGV capacity per route
-H = 80: workstation processing capacity per round
-B = 600: cache capacity
-d(i,j): Manhattan distance between nodes i and j
-```
+- $P$: pallets, $|P|=140$;
+- $S$: workstations, $|S|=18$;
+- $C_0$: candidate cache positions, up to 140 pallet/storage coordinates;
+- $m=10$: number of selected cache points;
+- $A$: AGVs, $|A|=24$;
+- $T$: planning rounds, for example $T=20$ covers all current ablation settings;
+- $q_p$: demand quantity on pallet $p$;
+- $Q=120$: AGV capacity per route;
+- $H=80$: workstation processing capacity per round;
+- $B=600$: cache capacity;
+- $d(i,j)$: Manhattan distance between nodes $i$ and $j$.
 
 Main decision variables:
 
-```text
-u_ps in {0,1}: pallet p is served by workstation s
-v_c  in {0,1}: candidate cache point c in C0 is selected
-x^D_apst in {0,1}: AGV a transports pallet p directly to workstation s at round t
-x^I_apct in {0,1}: AGV a transports pallet p to cache c at round t
-x^O_acst in {0,1}: AGV a transports from cache c to workstation s at round t
-g^D_apst, g^I_apct, g^O_acst >= 0: transported quantities
-R_pt >= 0: remaining quantity on pallet p after round t
-I_ct >= 0: inventory at cache c after round t
-L_st >= 0: workstation queue after round t
-h_st >= 0: quantity processed by workstation s at round t
-F_t in {0,1}: all demand has finished by the end of round t
-```
+- $u_{ps}\in\{0,1\}$: pallet $p$ is served by workstation $s$;
+- $v_c\in\{0,1\}$: candidate cache point $c\in C_0$ is selected;
+- $x^D_{apst}\in\{0,1\}$: AGV $a$ transports pallet $p$ directly to workstation $s$ at round $t$;
+- $x^I_{apct}\in\{0,1\}$: AGV $a$ transports pallet $p$ to cache $c$ at round $t$;
+- $x^O_{acst}\in\{0,1\}$: AGV $a$ transports from cache $c$ to workstation $s$ at round $t$;
+- $g^D_{apst},g^I_{apct},g^O_{acst}\ge 0$: transported quantities;
+- $R_{pt}\ge 0$: remaining quantity on pallet $p$ after round $t$;
+- $I_{ct}\ge 0$: inventory at cache $c$ after round $t$;
+- $L_{st}\ge 0$: workstation queue after round $t$;
+- $h_{st}\ge 0$: quantity processed by workstation $s$ at round $t$;
+- $F_t\in\{0,1\}$: all demand has finished by the end of round $t$.
 
 A lexicographic objective can first minimize completion time, then minimize AGV
 distance:
 
-```text
-min  M * sum_t (1 - F_t) + AGV_Total_Distance
-```
+$$
+\min\quad
+M\sum_{t\in T}(1-F_t)+D_{\mathrm{AGV}}
+$$
 
 Here `M` is a large weight. `AGV_Total_Distance` includes empty travel from the
 previous round endpoint to the next pickup point and loaded travel from pickup
@@ -733,40 +731,94 @@ variables between routes in consecutive rounds.
 
 Core constraints:
 
-```text
 Each pallet has one primary workstation:
-sum_s u_ps = 1
+
+$$
+\sum_{s\in S}u_{ps}=1,\quad \forall p\in P
+$$
 
 Workstation load balancing:
-sum_p q_p u_ps <= alpha * sum_p q_p / |S|
+
+$$
+\sum_{p\in P}q_pu_{ps}
+\le
+\alpha\frac{\sum_{p\in P}q_p}{|S|},
+\quad \forall s\in S
+$$
 
 Cache count and spacing:
-sum_c v_c = m
-v_c + v_c' <= 1, if dist(c,c') <= 6
+
+$$
+\sum_{c\in C_0}v_c=m
+$$
+
+$$
+v_c+v_{c'}\le 1,
+\quad \text{if }\operatorname{dist}(c,c')\le 6
+$$
 
 Each AGV executes at most one route per round:
-sum_{p,s} x^D_apst + sum_{p,c} x^I_apct + sum_{c,s} x^O_acst <= 1
+
+$$
+\sum_{p,s}x^D_{apst}
++\sum_{p,c}x^I_{apct}
++\sum_{c,s}x^O_{acst}
+\le 1,
+\quad \forall a,t
+$$
 
 AGV capacity:
-g^D_apst <= Q x^D_apst
-g^I_apct <= Q x^I_apct
-g^O_acst <= Q x^O_acst
+
+$$
+\begin{aligned}
+g^D_{apst}&\le Qx^D_{apst},\\
+g^I_{apct}&\le Qx^I_{apct},\\
+g^O_{acst}&\le Qx^O_{acst}.
+\end{aligned}
+$$
 
 Pallet remaining quantity:
-R_p,t = R_p,t-1 - sum_{a,s} g^D_apst - sum_{a,c} g^I_apct
+
+$$
+R_{p,t}
+=R_{p,t-1}
+-\sum_{a,s}g^D_{apst}
+-\sum_{a,c}g^I_{apct}
+$$
 
 Cache inventory:
-I_c,t = I_c,t-1 + sum_{a,p} g^I_apct - sum_{a,s} g^O_acst
-0 <= I_c,t <= B v_c
+
+$$
+I_{c,t}
+=I_{c,t-1}
++\sum_{a,p}g^I_{apct}
+-\sum_{a,s}g^O_{acst}
+$$
+
+$$
+0\le I_{c,t}\le Bv_c
+$$
 
 Workstation queue:
-L_s,t = L_s,t-1 + sum_{a,p} g^D_apst + sum_{a,c} g^O_acst - h_st
-0 <= h_st <= H
-0 <= h_st <= L_s,t-1 + quantity delivered this round
+
+$$
+L_{s,t}
+=L_{s,t-1}
++\sum_{a,p}g^D_{apst}
++\sum_{a,c}g^O_{acst}
+-h_{st}
+$$
+
+$$
+0\le h_{st}\le H
+$$
 
 Completion:
-F_t can be 1 only when all R_p,t, I_c,t, and L_s,t are zero
-```
+
+$$
+F_t=1\Rightarrow
+\sum_p R_{p,t}+\sum_c I_{c,t}+\sum_s L_{s,t}=0
+$$
 
 Additional feasibility constraints are required so that a pallet can only be
 served by its assigned workstation, and cache routes can only use selected
@@ -777,48 +829,57 @@ cache points that serve the relevant workstation.
 If Task 2 partitioning and Task 3 cache points are fixed, and the model only
 schedules precomputed transport batches, the current data have:
 
-```text
-pallets: 140
-AGVs: 24
-planning rounds: 20
-actual AGV transport batches: 149 to 197
-simple assignment binaries: 24 * 197 * 20 ≈ 94,560
-```
+- pallets: 140;
+- AGVs: 24;
+- planning rounds: 20;
+- actual AGV transport batches: 149 to 197;
+- simple assignment binaries:
+
+$$
+24\times197\times20\approx94{,}560
+$$
 
 However, exact AGV position continuity needs route transition variables:
 
-```text
-24 * 19 * 197^2 ≈ 17,700,000 binary transition variables
-```
+$$
+24\times19\times197^2
+\approx17{,}700{,}000
+$$
+
+binary transition variables.
 
 If partitioning and direct/cache route choices are solved jointly while the 10
 cache points selected by Task 3 are fixed, the action set already includes:
 
-```text
-pallet -> workstation: 140 * 18 = 2,520
-pallet -> cache:       140 * 10 = 1,400
-cache -> workstation:   10 * 18 =   180
-total: about 4,100 route actions
-```
+- pallet to workstation: $140\times18=2{,}520$;
+- pallet to cache: $140\times10=1{,}400$;
+- cache to workstation: $10\times18=180$;
+- total: about $4{,}100$ route actions.
 
 The `AGV-action-round` binaries alone are then:
 
-```text
-24 * 4,100 * 20 ≈ 1,968,000 binary variables
-```
+$$
+24\times4{,}100\times20
+\approx1{,}968{,}000
+$$
+
+binary variables.
 
 If cache location selection is also placed in the same model, the cache set is
 not 10 selected points but up to 140 candidate storage locations. Then:
 
-```text
-pallet -> candidate cache: 140 * 140 = 19,600
-cache -> workstation:       140 * 18  =  2,520
-route actions alone exceed 24,000
-AGV-action-round binaries: 24 * 24,640 * 20 ≈ 11,827,200
-```
+- pallet to candidate cache: $140\times140=19{,}600$;
+- cache to workstation: $140\times18=2{,}520$;
+- route actions alone exceed $24{,}000$;
+- `AGV-action-round` binaries:
+
+$$
+24\times24{,}640\times20
+\approx11{,}827{,}200
+$$
 
 Strict route-transition modeling would push the scale far beyond this. For the
-course project, the decomposed rolling heuristic is therefore a practical
+course project, the decomposed round-by-round heuristic is therefore a practical
 choice: it gives up global optimality guarantees in exchange for fast runtime,
 clear interpretation, and implementation with textbook-style algorithms.
 
@@ -826,7 +887,7 @@ clear interpretation, and implementation with textbook-style algorithms.
 
 The current experiment has several limitations:
 
-- **No global optimality guarantee**: the rolling experiment is heuristic and
+- **No global optimality guarantee**: the realistic scheduling experiment uses a round-by-round heuristic and
   may not achieve the minimum possible rounds or distance.
 - **Time and distance are simplified**: one AGV can execute at most one route
   per round. Distance affects total travel distance, but a longer route does
