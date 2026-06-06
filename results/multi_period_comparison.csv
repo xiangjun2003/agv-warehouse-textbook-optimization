@@ -1,0 +1,4 @@
+scenario,rounds,routes,agv_routes,station_pull_routes,total_agv_distance,station_pull_distance,processed_quantity,moved_to_cache_quantity,final_remaining_quantity,final_cache_quantity,agv_distance_saved_vs_task1_only,agv_distance_saved_pct_vs_task1_only,round_delta_vs_task1_only,agv_distance_saved_vs_partition,agv_distance_saved_pct_vs_partition,round_delta_vs_partition
+task1_only,15,173,173,0,3503.0,0,8478.0,0.0,0.0,0.0,0.0,0.0,0,,,
+task1_partition,15,174,174,0,3494.0,0,8478.0,0.0,0.0,0.0,9.0,0.002569226377390808,0,,,
+task1_partition_cache,16,273,172,101,1751.0,816.0,8478.0,7185.0,0.0,0.0,1752.0,0.5001427347987439,1,1743.0,0.4988551803091013,1

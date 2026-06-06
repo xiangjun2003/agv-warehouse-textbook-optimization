@@ -200,7 +200,7 @@ solve_warehouse_layout.py      Task 3 model builder and solver
 run_all.py                     one-click reproduction entry point
 results/                       generated CSV outputs
 scripts/make_readme_figures.py README figure generation script
-solve_multi_period.py          rolling completion experiment under initial total demand
+solve_multi_period.py          rolling ablation experiment under initial total demand
 ```
 
 Default problem sizes:
@@ -436,95 +436,81 @@ Each row is one selected cache/transfer location. The default result selects 10
 positions, with a minimum pairwise Manhattan distance of 7, satisfying the
 `dist > 6` spacing requirement.
 
-## 7. Multi-Period Rolling Optimization Extension
+## 7. Multi-Period Rolling Ablation Experiment
 
-![Rolling AGV process under initial total demand](figures/multi_period_rolling_process.png)
+![Rolling ablation comparison](figures/cache_distance_comparison.png)
 
-The first three tasks are single-snapshot models: they answer how to assign,
-partition, and select locations under the current warehouse state. To show how
-the three tasks jointly support one complete warehouse decision process, the
-project also implements a rolling completion experiment in
-`solve_multi_period.py`.
+![Rolling process with Task 1 + dynamic partitioning + cache](figures/multi_period_rolling_process.png)
 
-The integrated task is:
+The first three tasks are single-snapshot models. Task 1 answers which AGV
+should serve which pallet, Task 2 assigns pallet quantities to workstation
+service areas, and Task 3 selects cache/transfer locations. To show how these
+layers work together, `solve_multi_period.py` runs a rolling ablation
+experiment under one fixed initial demand batch.
+
+The business scenario is that all order demand is already present at time
+`t=0`. The system does not keep releasing new work. AGVs move once per round
+until all quantities have been processed by workstations. Each AGV carries at
+most `agv_capacity` per round, and each workstation processes at most
+`station_capacity` per round.
+
+The ablation compares three increasingly rich settings:
+
+| Setting | Added decision layer | Operational meaning | AGV delivery endpoint |
+| --- | --- | --- | --- |
+| Task 1 only | AGV dispatching | choose AGV-pallet-workstation tasks by rolling distance | workstation |
+| Task 1 + dynamic partitioning | dispatching + workstation service areas | Task 2 first assigns each pallet to a primary workstation | assigned workstation |
+| Task 1 + dynamic partitioning + cache | dispatching + service areas + cache state | AGVs replenish cache points; workstations consume cache inventory | cache point or workstation |
+
+Here, cache points are not modeled as mandatory extra AGV hops. They represent
+front-of-workstation staging or transfer buffers: AGVs perform the long-haul
+movement to a cache point, while the workstation side consumes inventory from
+that cache through local handling. Therefore the main metrics are **rounds to
+finish all demand** and **total AGV travel distance**. Cache-to-workstation
+local movement is recorded separately as an auxiliary metric.
+
+The rolling pipeline is:
 
 ```text
-rolling AGV processing with cache/transfer coordination under initial total demand
+read orders.csv and pallets.csv to build the t=0 initial demand
+  -> Setting A: rolling Task 1 dispatching only
+  -> Setting B: Task 2 primary workstation assignment + rolling Task 1 dispatching
+  -> Setting C: Setting B + Task 3 cache points with rolling cache inventory
+  -> compare completion rounds, AGV distance, and cache usage
 ```
 
-The business scenario is that a complete initial batch of order/inventory
-demand is already present at time `t=0`. The system does not keep adding new
-work. Instead, AGVs move once per round until all demand has been processed.
-In each round, AGVs start from their current positions, pick pallets, move them
-through selected cache/transfer points, and finally deliver them to
-workstations. The project therefore decides:
+Default data and parameters:
 
-- **layout layer**: which candidate locations are selected as cache/transfer
-  points, corresponding to Task 3;
-- **processing layer**: which pallet quantities should be processed by each
-  workstation in the current round, under workstation processing-rate limits,
-  and through which transfer point, corresponding to Task 2;
-- **execution layer**: which AGV serves which pallet and executes the concrete
-  route `AGV -> pallet -> transfer point -> workstation`, corresponding to
-  Task 1.
+- 675 order records from `orders.csv` are treated as the initial batch;
+- SKU demand is matched to 140 real pallets in `pallets.csv`, producing total
+  demand 8478;
+- 12 AGVs participate, each carrying at most 80 units per round;
+- 18 workstations each process at most 160 units per round;
+- Task 3 selects 10 cache points, each with default capacity 600.
 
-The rolling experiment is therefore a decision chain, not three unrelated
-figures placed together:
+The rolling process figure shows the full 16-round process for the third
+setting:
 
-```text
-Task 3: select fixed cache/transfer points
-  -> Task 2: plan each round under workstation processing-rate limits
-  -> Task 1: dispatch AGVs along AGV -> pallet -> transfer point -> workstation routes
-  -> update AGV positions and remaining quantities, then move to the next round
-```
-
-This extension does not randomly generate a new warehouse, and it does not keep
-releasing new orders. It builds an initial total demand from the existing CSV
-data and then rolls until remaining quantity reaches zero:
-
-1. read all 675 records in `orders.csv` as the initial demand at `t=0`;
-2. match SKU demand to real pallets using the `{SKU:quantity}` inventory in
-   `pallets.csv`, creating each pallet's remaining quantity;
-3. solve Task 3 at period 0 and select 10 fixed cache/transfer points;
-4. solve the round processing plan using the shortest
-   `pallet -> transfer point -> workstation` path cost while respecting
-   workstation processing-rate limits;
-5. solve AGV-pallet assignment from current AGV positions and build
-   `AGV -> pallet -> transfer point -> workstation` routes;
-6. each AGV moves at most once per round, carrying at most `agv_capacity`
-   quantity, and each workstation processes at most `station_capacity` quantity
-   per round;
-7. update dispatched AGV positions to their delivery workstations and reduce
-   pallet remaining quantities;
-8. repeat until all pallet remaining quantities are zero.
-
-The 15 subplots use the same coordinate scale and visual vocabulary. They show
-the full default experiment from round 1 to round 15:
-
-- blue triangles: AGV starting positions at the current round. Round 1 comes
-  from `bots.csv`; later rounds are updated from the previous delivery
-  workstations;
-- light-green circles: pallets with remaining quantity;
-- dark-green circles: pallets processed in the current round;
+- blue triangles: AGV starting positions in the current round;
+- light-green circles: pallets with remaining demand;
+- dark-green circles: pallets picked in the current round;
 - red-brown squares: workstations;
-- orange diamonds: selected cache/transfer points from Task 3, also used as
-  route nodes;
-- blue dashed lines: `AGV -> pallet` pickup segment;
-- orange solid lines: `pallet -> transfer point` segment;
-- pink dash-dot lines: `transfer point -> workstation` segment.
-
-The default parameters are 12 AGVs, `agv_capacity = 80` quantity per AGV per
-round, and `station_capacity = 160` quantity per workstation per round. The
-dataset has total demand 8478, and the default experiment completes it in
-15 rounds with 176 AGV routes.
+- orange diamonds: selected cache points;
+- blue dashed lines: `AGV -> pallet` pickup legs;
+- orange solid lines: AGV `pallet -> cache` delivery legs;
+- pink dash-dot lines: local `cache -> workstation` processing legs.
 
 Outputs:
 
 ```text
-results/multi_period_summary.csv   processed quantity, remaining quantity, dispatch count, workstation use, and solver status by round
-results/multi_period_routes.csv    AGV start, pallet, transfer point, workstation, processed quantity, and route cost by route
-results/multi_period_workload.csv  planned processing quantity, main workstation, and main transfer point by pallet and round
-figures/multi_period_rolling_process.png full rolling process figure
+results/multi_period_comparison.csv  ablation metrics: rounds, AGV distance, and cache savings
+results/multi_period_summary.csv     processed quantity, remaining quantity, dispatch count, workstation use, and solver status by round
+results/multi_period_routes.csv      transport/processing records with endpoints, quantity, and distance
+results/multi_period_workload.csv    planned quantity and planned receiver by pallet and round
+results/multi_period_partition.csv   Task 2 dynamic partitioning result under initial demand
+results/cache_inventory.csv          cache inventory by round
+figures/cache_distance_comparison.png ablation comparison figure
+figures/multi_period_rolling_process.png rolling process figure for the cache setting
 ```
 
 Run:
@@ -576,7 +562,7 @@ figures. `solve_multi_period.py` generates the rolling process figure.
 | Task 1 AGV assignment | LP relaxation plus integer recovery | Chapter 7 | primal-dual interior-point method | `algorithms/primal_dual_lp.py` |
 | Task 2 dynamic partitioning | linear programming | Chapter 7 | primal-dual interior-point method | `algorithms/primal_dual_lp.py` |
 | Task 3 cache/transfer location selection | spatially constrained 0-1 selection via continuous relaxation | Chapter 7 + Chapter 6 | quadratic penalty + projected BB gradient + repair | `algorithms/quadratic_penalty.py`, `algorithms/projected_bb_gradient.py` |
-| Multi-period rolling optimization | decomposed rolling completion under initial total demand | Chapter 7 + Chapter 6 | cache/transfer selection + processing-plan LP with workstation-rate limits + transfer-aware AGV assignment LP | `solve_multi_period.py` |
+| Multi-period rolling ablation | decomposed rolling completion under initial total demand | Chapter 7 + Chapter 6 | Task 1 dispatch LP + Task 2 partition LP + Task 3 cache selection + rolling cache inventory updates | `solve_multi_period.py` |
 
 ## 10. Results and Analysis
 
@@ -600,22 +586,28 @@ Interpretation:
 A typical `python solve_multi_period.py` run prints:
 
 ```text
-rounds=15 routes=176 processed=8478.000
-[r=1] active=140 dispatched=12 processed=828.0 remaining=7650.0
-[r=2] active=135 dispatched=12 processed=631.0 remaining=7019.0
-[r=3] active=124 dispatched=12 processed=541.0 remaining=6478.0
-...
-[r=13] active=29 dispatched=12 processed=566.0 remaining=301.0
-[r=14] active=20 dispatched=12 processed=257.0 remaining=44.0
-[r=15] active=8 dispatched=8 processed=44.0 remaining=0.0
+Rolling ablation optimization
+scenarios=3 route_records=620 time=3.957s
+[task1_only] rounds=15 agv_routes=173 agv_distance=3503.000 processed=8478.000 cached=0.000
+[task1_partition] rounds=15 agv_routes=174 agv_distance=3494.000 processed=8478.000 cached=0.000
+[task1_partition_cache] rounds=16 agv_routes=172 agv_distance=1751.000 processed=8478.000 cached=7185.000
+cache agv-distance saving vs partition=1743.000 (49.89%)
 ```
 
-The rolling result shows that all demand is fixed at the initial time. The
-system processes part of the remaining quantity each round. With the default
-parameters, round 1 processes 828 units, round 15 processes the last 44 units,
-and remaining quantity reaches 0. This answers how many AGV rounds are needed
-to finish the initial batch while also showing the roles of cache/transfer
-layout, workstation processing speed, and AGV carrying capacity.
+The rolling result shows that all demand is fixed at the initial time. With the
+default parameters, Task 1 alone finishes in 15 rounds with total AGV distance
+3503. Adding dynamic partitioning keeps the completion time at 15 rounds and
+slightly reduces AGV distance to 3494. Adding cache points reduces the AGV
+long-haul distance to 1751, saving 1743 versus the partition setting
+(49.89%), but the cache inventory must still be consumed by workstations, so
+completion increases to 16 rounds.
+
+This also explains why an earlier "force every item through cache and let AGVs
+move it again from cache to workstation" setup was worse: it split one item
+into two AGV trips. The current model treats cache points as front-of-line
+staging buffers, records local cache-to-workstation handling separately, and
+therefore captures the trade-off more realistically: less AGV travel, but
+possible inventory waiting.
 
 Together, the three experiments show how one warehouse dataset can be turned
 into different optimization models across dispatching, service-area
