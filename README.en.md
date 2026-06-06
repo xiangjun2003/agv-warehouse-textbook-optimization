@@ -200,7 +200,7 @@ solve_warehouse_layout.py      Task 3 model builder and solver
 run_all.py                     one-click reproduction entry point
 results/                       generated CSV outputs
 scripts/make_readme_figures.py README figure generation script
-solve_multi_period.py          six-period rolling optimization extension
+solve_multi_period.py          rolling completion experiment under initial total demand
 ```
 
 Default problem sizes:
@@ -438,29 +438,32 @@ positions, with a minimum pairwise Manhattan distance of 7, satisfying the
 
 ## 7. Multi-Period Rolling Optimization Extension
 
-![Six-period rolling AGV process](figures/multi_period_rolling_process.png)
+![Rolling AGV process under initial total demand](figures/multi_period_rolling_process.png)
 
 The first three tasks are single-snapshot models: they answer how to assign,
 partition, and select locations under the current warehouse state. To show how
 the three tasks jointly support one complete warehouse decision process, the
-project also implements a six-period rolling optimization experiment in
+project also implements a rolling completion experiment in
 `solve_multi_period.py`.
 
 The integrated task is:
 
 ```text
-order-wave-driven rolling AGV dispatching with cache/transfer coordination
+rolling AGV processing with cache/transfer coordination under initial total demand
 ```
 
-The business scenario is that warehouse orders are released in batches. AGVs
-start from their current positions, pick pallets, move them through selected
-cache/transfer points, and finally deliver them to workstations. The project
-therefore decides:
+The business scenario is that a complete initial batch of order/inventory
+demand is already present at time `t=0`. The system does not keep adding new
+work. Instead, AGVs move once per round until all demand has been processed.
+In each round, AGVs start from their current positions, pick pallets, move them
+through selected cache/transfer points, and finally deliver them to
+workstations. The project therefore decides:
 
 - **layout layer**: which candidate locations are selected as cache/transfer
   points, corresponding to Task 3;
-- **partition layer**: which workstation and transfer point should serve each
-  active pallet task in the current wave, corresponding to Task 2;
+- **processing layer**: which pallet quantities should be processed by each
+  workstation in the current round, under workstation processing-rate limits,
+  and through which transfer point, corresponding to Task 2;
 - **execution layer**: which AGV serves which pallet and executes the concrete
   route `AGV -> pallet -> transfer point -> workstation`, corresponding to
   Task 1.
@@ -470,33 +473,39 @@ figures placed together:
 
 ```text
 Task 3: select fixed cache/transfer points
-  -> Task 2: partition each wave using pallet -> transfer point -> workstation costs
+  -> Task 2: plan each round under workstation processing-rate limits
   -> Task 1: dispatch AGVs along AGV -> pallet -> transfer point -> workstation routes
-  -> update AGV positions and unfinished tasks, then move to the next period
+  -> update AGV positions and remaining quantities, then move to the next round
 ```
 
-This extension does not randomly generate a new warehouse. It builds six
-reproducible order waves from the existing CSV data:
+This extension does not randomly generate a new warehouse, and it does not keep
+releasing new orders. It builds an initial total demand from the existing CSV
+data and then rolls until remaining quantity reaches zero:
 
-1. split the 675 records in `orders.csv` into six consecutive waves by
-   `Order ID`;
-2. match each wave's SKU demand to real pallets using the `{SKU:quantity}`
-   inventory in `pallets.csv`;
+1. read all 675 records in `orders.csv` as the initial demand at `t=0`;
+2. match SKU demand to real pallets using the `{SKU:quantity}` inventory in
+   `pallets.csv`, creating each pallet's remaining quantity;
 3. solve Task 3 at period 0 and select 10 fixed cache/transfer points;
-4. solve dynamic partitioning at each period using the shortest
-   `pallet -> transfer point -> workstation` path cost;
+4. solve the round processing plan using the shortest
+   `pallet -> transfer point -> workstation` path cost while respecting
+   workstation processing-rate limits;
 5. solve AGV-pallet assignment from current AGV positions and build
    `AGV -> pallet -> transfer point -> workstation` routes;
-6. update each dispatched AGV's position to the delivery workstation and carry
-   unfinished pallet demand as backlog.
+6. each AGV moves at most once per round, carrying at most `agv_capacity`
+   quantity, and each workstation processes at most `station_capacity` quantity
+   per round;
+7. update dispatched AGV positions to their delivery workstations and reduce
+   pallet remaining quantities;
+8. repeat until all pallet remaining quantities are zero.
 
-The six subplots use the same coordinate scale and visual vocabulary:
+The 15 subplots use the same coordinate scale and visual vocabulary. They show
+the full default experiment from round 1 to round 15:
 
-- blue triangles: AGV starting positions at the current period. Period 1 comes
-  from `bots.csv`; later periods are updated from the previous delivery
+- blue triangles: AGV starting positions at the current round. Round 1 comes
+  from `bots.csv`; later rounds are updated from the previous delivery
   workstations;
-- light-green circles: released but still pending pallet tasks;
-- dark-green circles: pallet tasks dispatched in the current period;
+- light-green circles: pallets with remaining quantity;
+- dark-green circles: pallets processed in the current round;
 - red-brown squares: workstations;
 - orange diamonds: selected cache/transfer points from Task 3, also used as
   route nodes;
@@ -504,20 +513,18 @@ The six subplots use the same coordinate scale and visual vocabulary:
 - orange solid lines: `pallet -> transfer point` segment;
 - pink dash-dot lines: `transfer point -> workstation` segment.
 
-The default rolling experiment uses 12 AGVs per period and outputs 72 routes
-over six periods. Because six periods can process only 72 pallet tasks while
-the dataset contains 140 pallets and 675 order records, backlog remains in the
-figure. This is intentional: it shows the capacity limit in a rolling
-dispatching process. To clear all demand, the experiment would need more
-periods, more AGVs, or a different wave release policy.
+The default parameters are 12 AGVs, `agv_capacity = 80` quantity per AGV per
+round, and `station_capacity = 160` quantity per workstation per round. The
+dataset has total demand 8478, and the default experiment completes it in
+15 rounds with 176 AGV routes.
 
 Outputs:
 
 ```text
-results/multi_period_summary.csv   period-level order count, dispatch count, backlog, and solver status
-results/multi_period_routes.csv    AGV start, pallet, transfer point, workstation, and route cost for every dispatched route
-results/multi_period_workload.csv  active pallet workload, main workstation, and main transfer point at each period
-figures/multi_period_rolling_process.png six-period dynamic process figure
+results/multi_period_summary.csv   processed quantity, remaining quantity, dispatch count, workstation use, and solver status by round
+results/multi_period_routes.csv    AGV start, pallet, transfer point, workstation, processed quantity, and route cost by route
+results/multi_period_workload.csv  planned processing quantity, main workstation, and main transfer point by pallet and round
+figures/multi_period_rolling_process.png full rolling process figure
 ```
 
 Run:
@@ -560,7 +567,7 @@ python scripts/make_readme_figures.py
 ```
 
 `scripts/make_readme_figures.py` regenerates the three single-snapshot README
-figures. `solve_multi_period.py` generates the six-period rolling figure.
+figures. `solve_multi_period.py` generates the rolling process figure.
 
 ## 9. Textbook Chapter and Algorithm Mapping
 
@@ -569,7 +576,7 @@ figures. `solve_multi_period.py` generates the six-period rolling figure.
 | Task 1 AGV assignment | LP relaxation plus integer recovery | Chapter 7 | primal-dual interior-point method | `algorithms/primal_dual_lp.py` |
 | Task 2 dynamic partitioning | linear programming | Chapter 7 | primal-dual interior-point method | `algorithms/primal_dual_lp.py` |
 | Task 3 cache/transfer location selection | spatially constrained 0-1 selection via continuous relaxation | Chapter 7 + Chapter 6 | quadratic penalty + projected BB gradient + repair | `algorithms/quadratic_penalty.py`, `algorithms/projected_bb_gradient.py` |
-| Multi-period rolling optimization | decomposed rolling optimization over six consecutive waves | Chapter 7 + Chapter 6 | cache/transfer selection + transfer-aware dynamic partitioning LP + transfer-aware AGV assignment LP | `solve_multi_period.py` |
+| Multi-period rolling optimization | decomposed rolling completion under initial total demand | Chapter 7 + Chapter 6 | cache/transfer selection + processing-plan LP with workstation-rate limits + transfer-aware AGV assignment LP | `solve_multi_period.py` |
 
 ## 10. Results and Analysis
 
@@ -593,20 +600,22 @@ Interpretation:
 A typical `python solve_multi_period.py` run prints:
 
 ```text
-[t=1] orders=113 active=93 dispatched=12 backlog=81 cost=152.000
-[t=2] orders=113 active=122 dispatched=12 backlog=110 cost=165.000
-[t=3] orders=113 active=125 dispatched=12 backlog=113 cost=168.000
-[t=4] orders=112 active=127 dispatched=12 backlog=115 cost=174.000
-[t=5] orders=112 active=128 dispatched=12 backlog=116 cost=168.000
-[t=6] orders=112 active=125 dispatched=12 backlog=113 cost=174.000
+rounds=15 routes=176 processed=8478.000
+[r=1] active=140 dispatched=12 processed=828.0 remaining=7650.0
+[r=2] active=135 dispatched=12 processed=631.0 remaining=7019.0
+[r=3] active=124 dispatched=12 processed=541.0 remaining=6478.0
+...
+[r=13] active=29 dispatched=12 processed=566.0 remaining=301.0
+[r=14] active=20 dispatched=12 processed=257.0 remaining=44.0
+[r=15] active=8 dispatched=8 processed=44.0 remaining=0.0
 ```
 
-The rolling result shows that each period dispatches 12 AGVs, and every route
-uses one of the cache/transfer points selected by Task 3. The released demand
-is much larger than 12 pallet tasks per period, so backlog accumulates. The
-six-period experiment is useful for showing rolling dispatching, transfer-point
-layout, and vehicle capacity limits; clearing all demand would require
-additional periods or more per-period processing capacity.
+The rolling result shows that all demand is fixed at the initial time. The
+system processes part of the remaining quantity each round. With the default
+parameters, round 1 processes 828 units, round 15 processes the last 44 units,
+and remaining quantity reaches 0. This answers how many AGV rounds are needed
+to finish the initial batch while also showing the roles of cache/transfer
+layout, workstation processing speed, and AGV carrying capacity.
 
 Together, the three experiments show how one warehouse dataset can be turned
 into different optimization models across dispatching, service-area

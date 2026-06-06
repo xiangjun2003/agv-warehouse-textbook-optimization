@@ -50,20 +50,22 @@ class Order:
 @dataclass
 class PeriodResult:
     period: int
-    released_orders: int
-    released_quantity: float
-    active_pallets: int
+    active_pallets_before: int
     dispatched_pallets: int
-    backlog_pallets: int
-    backlog_quantity_after: float
+    processed_quantity: float
+    remaining_pallets_after: int
+    remaining_quantity_after: float
+    station_capacity: float
+    agv_capacity: float
+    station_count_used: int
     partition_status: str
     partition_iterations: int
     partition_objective: float
     assignment_status: str
     assignment_iterations: int
     assignment_cost: float
-    min_station_load: float
-    max_station_load: float
+    min_station_processed: float
+    max_station_processed: float
 
 
 def _parse_sku_amounts(raw: str) -> dict[int, int]:
@@ -99,17 +101,6 @@ def read_orders(path: Path = DATA_DIR / "orders.csv") -> list[Order]:
     return orders
 
 
-def split_orders(orders: list[Order], periods: int) -> list[list[Order]]:
-    quotient, remainder = divmod(len(orders), periods)
-    waves: list[list[Order]] = []
-    start = 0
-    for period in range(periods):
-        stop = start + quotient + (1 if period < remainder else 0)
-        waves.append(orders[start:stop])
-        start = stop
-    return waves
-
-
 def build_sku_index(inventories: list[dict[int, int]]) -> dict[int, list[int]]:
     sku_to_pallets: dict[int, list[int]] = {}
     for pallet_index, inventory in enumerate(inventories):
@@ -119,12 +110,12 @@ def build_sku_index(inventories: list[dict[int, int]]) -> dict[int, list[int]]:
     return sku_to_pallets
 
 
-def allocate_wave(
+def allocate_initial_demand(
     orders: list[Order],
     available_inventory: list[dict[int, int]],
     sku_to_pallets: dict[int, list[int]],
 ) -> tuple[np.ndarray, float]:
-    released = np.zeros(len(available_inventory), dtype=float)
+    demand = np.zeros(len(available_inventory), dtype=float)
     unmet = 0.0
     for order in orders:
         amount_left = float(order.amount)
@@ -141,10 +132,10 @@ def allocate_wave(
                 continue
             take = min(available, amount_left)
             available_inventory[pallet_index][order.sku] = int(round(available - take))
-            released[pallet_index] += take
+            demand[pallet_index] += take
             amount_left -= take
         unmet += max(0.0, amount_left)
-    return released, unmet
+    return demand, unmet
 
 
 def best_cache_paths(
@@ -160,79 +151,172 @@ def best_cache_paths(
     return service_costs, best_cache_indices
 
 
-def solve_period_partition(
+def solve_round_processing_plan(
     quantities: np.ndarray,
     service_costs: np.ndarray,
     *,
-    alpha: float,
+    station_capacity: float,
+    agv_total_capacity: float,
+    leftover_penalty: float = 10_000.0,
     verbose: bool = False,
 ) -> tuple[LPResult, np.ndarray, np.ndarray, float]:
     pallet_count, station_count = service_costs.shape
     flow_count = pallet_count * station_count
-    var_count = flow_count + station_count
-    row_count = pallet_count + station_count
+    leftover_count = pallet_count
+    station_slack_count = station_count
+    total_slack_count = 1
+    leftover0 = flow_count
+    station_slack0 = leftover0 + leftover_count
+    total_slack0 = station_slack0 + station_slack_count
+    var_count = total_slack0 + total_slack_count
+    row_count = pallet_count + station_count + 1
 
     c = np.zeros(var_count)
     c[:flow_count] = service_costs.reshape(-1)
+    c[leftover0:station_slack0] = leftover_penalty
+
     A = np.zeros((row_count, var_count))
     b = np.zeros(row_count)
-
+    row = 0
     for pallet_index in range(pallet_count):
         start = pallet_index * station_count
-        A[pallet_index, start : start + station_count] = 1.0
-        b[pallet_index] = quantities[pallet_index]
+        A[row, start : start + station_count] = 1.0
+        A[row, leftover0 + pallet_index] = 1.0
+        b[row] = quantities[pallet_index]
+        row += 1
 
-    total_quantity = float(np.sum(quantities))
-    min_station_load = alpha * total_quantity / station_count
     for station_index in range(station_count):
-        row = pallet_count + station_index
         A[row, station_index:flow_count:station_count] = 1.0
-        A[row, flow_count + station_index] = -1.0
-        b[row] = min_station_load
+        A[row, station_slack0 + station_index] = 1.0
+        b[row] = station_capacity
+        row += 1
+
+    A[row, :flow_count] = 1.0
+    A[row, total_slack0] = 1.0
+    b[row] = agv_total_capacity
 
     result = solve_lp_primal_dual(
         c,
         A,
         b,
-        max_iter=180,
-        tol=5e-6,
+        max_iter=220,
+        tol=1e-5,
         regularization=1e-8,
         verbose=verbose,
     )
     flows = result.x[:flow_count].reshape(pallet_count, station_count)
-    loads = flows.sum(axis=0)
+    station_loads = flows.sum(axis=0)
     objective = float(np.sum(service_costs * flows))
-    return result, flows, loads, objective
+    return result, flows, station_loads, objective
 
 
-def solve_period_assignment(
-    agv_positions: list[tuple[int, int]],
-    pallet_positions: list[tuple[int, int]],
-    station_indices: np.ndarray,
-    cache_positions: list[tuple[int, int]],
+def select_round_tasks(
+    quantities: np.ndarray,
+    planned_flows: np.ndarray,
     service_costs: np.ndarray,
     best_cache_indices: np.ndarray,
+    *,
+    agv_capacity: float,
+    station_capacity: float,
+    max_tasks: int,
+) -> list[dict[str, float | int]]:
+    station_count = planned_flows.shape[1]
+    station_remaining = np.full(station_count, station_capacity, dtype=float)
+    selected: list[dict[str, float | int]] = []
+    selected_pallets: set[int] = set()
+
+    candidate_rows: list[tuple[float, float, int, int]] = []
+    for pallet_index in range(planned_flows.shape[0]):
+        for station_index in range(station_count):
+            planned = float(planned_flows[pallet_index, station_index])
+            if planned > 1e-6:
+                cost = float(service_costs[pallet_index, station_index])
+                candidate_rows.append((-planned, cost, pallet_index, station_index))
+    candidate_rows.sort()
+
+    def try_add(pallet_index: int, station_index: int) -> bool:
+        if len(selected) >= max_tasks:
+            return False
+        if pallet_index in selected_pallets:
+            return False
+        if quantities[pallet_index] <= 1e-8:
+            return False
+        if station_remaining[station_index] <= 1e-8:
+            return False
+        process_quantity = min(
+            float(quantities[pallet_index]),
+            agv_capacity,
+            float(station_remaining[station_index]),
+        )
+        if process_quantity <= 1e-8:
+            return False
+        selected.append(
+            {
+                "local_pallet_index": pallet_index,
+                "workstation_index": station_index,
+                "cache_index": int(best_cache_indices[pallet_index, station_index]),
+                "process_quantity": process_quantity,
+            }
+        )
+        selected_pallets.add(pallet_index)
+        station_remaining[station_index] -= process_quantity
+        return True
+
+    for _, _, pallet_index, station_index in candidate_rows:
+        try_add(pallet_index, station_index)
+        if len(selected) >= max_tasks:
+            return selected
+
+    remaining_pallets = np.argsort(-quantities)
+    for raw_pallet_index in remaining_pallets:
+        pallet_index = int(raw_pallet_index)
+        if pallet_index in selected_pallets or quantities[pallet_index] <= 1e-8:
+            continue
+        for raw_station_index in np.argsort(service_costs[pallet_index]):
+            if try_add(pallet_index, int(raw_station_index)):
+                break
+        if len(selected) >= max_tasks:
+            break
+    return selected
+
+
+def solve_round_assignment(
+    agv_positions: list[tuple[int, int]],
+    pallet_positions: list[tuple[int, int]],
+    tasks: list[dict[str, float | int]],
+    cache_positions: list[tuple[int, int]],
     workstations: list[tuple[int, int]],
     *,
     verbose: bool = False,
 ) -> tuple[LPResult, list[dict[str, float | int]], float]:
-    if not pallet_positions:
-        raise ValueError("period assignment requires at least one active pallet")
+    if not tasks:
+        raise ValueError("round assignment requires at least one task")
 
-    all_agvs = list(agv_positions)
-    full_agv_pallet = distance_matrix(all_agvs, pallet_positions)
-    agv_count = min(len(all_agvs), len(pallet_positions))
+    task_pallet_positions = [
+        pallet_positions[int(task["local_pallet_index"])] for task in tasks
+    ]
+    full_agv_pallet = distance_matrix(agv_positions, task_pallet_positions)
+    task_count = len(tasks)
+    agv_count = min(len(agv_positions), task_count)
     chosen_agv_indices = np.argsort(np.min(full_agv_pallet, axis=1))[:agv_count]
-    agvs = [all_agvs[int(idx)] for idx in chosen_agv_indices]
+    agvs = [agv_positions[int(idx)] for idx in chosen_agv_indices]
 
-    agv_pallet = distance_matrix(agvs, pallet_positions)
-    fixed_service = service_costs[np.arange(len(pallet_positions)), station_indices]
-    costs = agv_pallet + fixed_service[None, :]
+    agv_pallet = distance_matrix(agvs, task_pallet_positions)
+    service = np.zeros(task_count, dtype=float)
+    for task_index, task in enumerate(tasks):
+        pallet = task_pallet_positions[task_index]
+        cache = cache_positions[int(task["cache_index"])]
+        workstation = workstations[int(task["workstation_index"])]
+        service[task_index] = (
+            distance_matrix([pallet], [cache])[0, 0]
+            + distance_matrix([cache], [workstation])[0, 0]
+        )
+    costs = agv_pallet + service[None, :]
 
-    x_count = agv_count * len(pallet_positions)
-    slack_count = len(pallet_positions)
+    x_count = agv_count * task_count
+    slack_count = task_count
     var_count = x_count + slack_count
-    row_count = agv_count + len(pallet_positions)
+    row_count = agv_count + task_count
     c = np.zeros(var_count)
     c[:x_count] = costs.reshape(-1)
     A = np.zeros((row_count, var_count))
@@ -240,13 +324,13 @@ def solve_period_assignment(
 
     row = 0
     for agv_index in range(agv_count):
-        start = agv_index * len(pallet_positions)
-        A[row, start : start + len(pallet_positions)] = 1.0
+        start = agv_index * task_count
+        A[row, start : start + task_count] = 1.0
         b[row] = 1.0
         row += 1
-    for pallet_index in range(len(pallet_positions)):
-        A[row, pallet_index:x_count:len(pallet_positions)] = 1.0
-        A[row, x_count + pallet_index] = 1.0
+    for task_index in range(task_count):
+        A[row, task_index:x_count:task_count] = 1.0
+        A[row, x_count + task_index] = 1.0
         b[row] = 1.0
         row += 1
 
@@ -259,33 +343,33 @@ def solve_period_assignment(
         regularization=1e-8,
         verbose=verbose,
     )
-    relaxed = result.x[:x_count].reshape(agv_count, len(pallet_positions))
+    relaxed = result.x[:x_count].reshape(agv_count, task_count)
 
     assignments: list[dict[str, float | int]] = []
-    used_pallets: set[int] = set()
+    used_tasks: set[int] = set()
     agv_order = np.argsort(-np.max(relaxed, axis=1))
     for local_agv_index in agv_order:
-        pallet_order = np.lexsort((costs[local_agv_index], -relaxed[local_agv_index]))
-        chosen_pallet = None
-        for raw_pallet_index in pallet_order:
-            pallet_index = int(raw_pallet_index)
-            if pallet_index not in used_pallets:
-                chosen_pallet = pallet_index
+        task_order = np.lexsort((costs[local_agv_index], -relaxed[local_agv_index]))
+        chosen_task = None
+        for raw_task_index in task_order:
+            task_index = int(raw_task_index)
+            if task_index not in used_tasks:
+                chosen_task = task_index
                 break
-        if chosen_pallet is None:
+        if chosen_task is None:
             continue
-        used_pallets.add(chosen_pallet)
-        station_index = int(station_indices[chosen_pallet])
-        cache_index = int(best_cache_indices[chosen_pallet, station_index])
-        pickup = float(agv_pallet[local_agv_index, chosen_pallet])
-        transfer = float(distance_matrix([pallet_positions[chosen_pallet]], [cache_positions[cache_index]])[0, 0])
-        final_delivery = float(distance_matrix([cache_positions[cache_index]], [workstations[station_index]])[0, 0])
+        used_tasks.add(chosen_task)
+        task = tasks[chosen_task]
+        pickup = float(agv_pallet[local_agv_index, chosen_task])
+        pallet = task_pallet_positions[chosen_task]
+        cache = cache_positions[int(task["cache_index"])]
+        workstation = workstations[int(task["workstation_index"])]
+        transfer = float(distance_matrix([pallet], [cache])[0, 0])
+        final_delivery = float(distance_matrix([cache], [workstation])[0, 0])
         assignments.append(
             {
+                **task,
                 "agv_index": int(chosen_agv_indices[local_agv_index]),
-                "local_pallet_index": chosen_pallet,
-                "cache_index": cache_index,
-                "workstation_index": station_index,
                 "pickup_distance": pickup,
                 "transfer_distance": transfer,
                 "cache_to_workstation_distance": final_delivery,
@@ -358,14 +442,16 @@ def plot_multi_period(
     data,
     period_snapshots: list[dict[str, object]],
     selected_cache_indices: list[int],
-    pallet_ids: list[int],
     output: Path,
 ) -> None:
     _configure_plot_style()
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    fig, axes = plt.subplots(2, 3, figsize=(18.5, 11.2), dpi=170)
-    axes = axes.ravel()
+    columns = 3
+    rows = int(np.ceil(len(period_snapshots) / columns))
+    fig_height = 2.75 + rows * 3.25
+    fig, axes = plt.subplots(rows, columns, figsize=(18.5, fig_height), dpi=170)
+    axes = np.asarray(axes).ravel()
     nodes = np.asarray([(x, y) for _, x, y in data.nodes], dtype=float)
     workstations = np.asarray(data.workstations, dtype=float)
     cache_points = np.asarray([data.pallets[idx] for idx in selected_cache_indices], dtype=float)
@@ -380,18 +466,17 @@ def plot_multi_period(
             linewidths=0,
             zorder=0,
         )
-        if len(cache_points) > 0:
-            ax.scatter(
-                cache_points[:, 0],
-                cache_points[:, 1],
-                s=80,
-                c=COLORS["cache"],
-                marker="D",
-                edgecolors=COLORS["ink"],
-                linewidths=0.65,
-                alpha=0.92,
-                zorder=4,
-            )
+        ax.scatter(
+            cache_points[:, 0],
+            cache_points[:, 1],
+            s=80,
+            c=COLORS["cache"],
+            marker="D",
+            edgecolors=COLORS["ink"],
+            linewidths=0.65,
+            alpha=0.92,
+            zorder=4,
+        )
 
         active_indices = np.asarray(snapshot["active_indices"], dtype=int)
         dispatched_indices = np.asarray(snapshot["dispatched_indices"], dtype=int)
@@ -491,21 +576,22 @@ def plot_multi_period(
         ax.set_ylabel("Y", fontsize=9.5, fontweight="semibold")
         ax.set_title(
             (
-                f"时刻 {snapshot['period']} | 释放 {snapshot['released_orders']} 单 | "
-                f"派车 {len(routes)} 辆\n"
-                f"待处理托盘 {len(active_indices)} | "
-                f"积压 {snapshot['backlog_pallets']} 托盘 / "
-                f"{snapshot['backlog_quantity_after']:.0f} 件"
+                f"轮次 {snapshot['period']} | 处理 {snapshot['processed_quantity']:.0f} 件 | "
+                f"剩余 {snapshot['remaining_quantity_after']:.0f} 件\n"
+                f"待处理托盘 {len(active_indices)} | 派车 {len(routes)} 辆"
             ),
-            fontsize=12.7,
+            fontsize=11.4,
             fontweight="bold",
             pad=8,
         )
 
+    for ax in axes[len(period_snapshots) :]:
+        ax.axis("off")
+
     legend_handles = [
-        Line2D([0], [0], marker="^", color="none", markerfacecolor=COLORS["agv"], markeredgecolor=COLORS["panel"], markersize=8, label="AGV 当前时刻起点"),
-        Line2D([0], [0], marker="o", color="none", markerfacecolor=COLORS["pallet_waiting"], markeredgecolor=COLORS["axis"], markersize=8, label="待处理托盘任务"),
-        Line2D([0], [0], marker="o", color="none", markerfacecolor=COLORS["pallet_dispatch"], markeredgecolor=COLORS["ink"], markersize=8, label="本时刻派车处理托盘"),
+        Line2D([0], [0], marker="^", color="none", markerfacecolor=COLORS["agv"], markeredgecolor=COLORS["panel"], markersize=8, label="AGV 当前轮起点"),
+        Line2D([0], [0], marker="o", color="none", markerfacecolor=COLORS["pallet_waiting"], markeredgecolor=COLORS["axis"], markersize=8, label="剩余待处理托盘"),
+        Line2D([0], [0], marker="o", color="none", markerfacecolor=COLORS["pallet_dispatch"], markeredgecolor=COLORS["ink"], markersize=8, label="本轮处理托盘"),
         Line2D([0], [0], marker="s", color="none", markerfacecolor=COLORS["workstation"], markeredgecolor=COLORS["panel"], markersize=8, label="工位"),
         Line2D([0], [0], marker="D", color="none", markerfacecolor=COLORS["cache"], markeredgecolor=COLORS["ink"], markersize=8, label="缓存/中转点"),
         Line2D([0], [0], color=COLORS["pickup"], linestyle="--", linewidth=2.0, label="AGV 到托盘"),
@@ -526,18 +612,18 @@ def plot_multi_period(
         columnspacing=1.0,
     )
     fig.suptitle(
-        "6 个滚动时刻的 AGV 仓储调度过程",
+        f"初始总需求下的 AGV 滚动处理过程：全部 {len(period_snapshots)} 轮",
         fontsize=27,
         fontweight="bold",
         color=COLORS["ink"],
-        y=0.986,
+        y=0.992,
     )
     fig.text(
         0.5,
-        0.952,
+        0.972,
         (
-            "订单按 Order ID 切分为 6 个连续波次；先用布局模型选中转点，"
-            "每个时刻再做经中转点的工位负载分配和 AGV 派车。"
+            "所有订单需求在 t=0 给定；每轮 AGV 各执行一次，"
+            "工位有处理速度上限，循环直到剩余货量为 0。"
         ),
         ha="center",
         va="top",
@@ -545,7 +631,7 @@ def plot_multi_period(
         fontweight="semibold",
         color=COLORS["muted"],
     )
-    fig.subplots_adjust(left=0.045, right=0.99, top=0.91, bottom=0.13, wspace=0.13, hspace=0.22)
+    fig.subplots_adjust(left=0.045, right=0.99, top=0.94, bottom=0.055, wspace=0.13, hspace=0.42)
     fig.savefig(output, bbox_inches="tight")
     plt.close(fig)
 
@@ -570,13 +656,14 @@ def write_rows(path: Path, fieldnames: list[str], rows: list[dict[str, object]])
 
 def solve_multi_period(
     *,
-    periods: int = 6,
     seed: int = 0,
     sample_prob: float = 0.6,
     max_agvs: int = 12,
-    alpha: float = 0.6,
+    agv_capacity: float = 80.0,
+    station_capacity: float = 160.0,
     choose_count: int = 10,
     min_distance: int = 6,
+    max_rounds: int = 200,
     output_dir: Path = RESULTS_DIR,
     figure_path: Path = FIGURES_DIR / "multi_period_rolling_process.png",
     verbose: bool = False,
@@ -585,10 +672,15 @@ def solve_multi_period(
     data = load_data(agv_sample_prob=sample_prob, seed=seed, max_agvs=max_agvs)
     pallet_ids, pallet_coords, initial_inventory, _ = read_pallet_inventory()
     orders = read_orders()
-    waves = split_orders(orders, periods)
     sku_to_pallets = build_sku_index(initial_inventory)
-    available_inventory = [dict(inventory) for inventory in initial_inventory]
-    pending = np.zeros(len(pallet_ids), dtype=float)
+    demand, unmet = allocate_initial_demand(
+        orders,
+        [dict(inventory) for inventory in initial_inventory],
+        sku_to_pallets,
+    )
+    if unmet > 1e-6:
+        raise RuntimeError(f"initial demand has unmet quantity {unmet:.6f}")
+    pending = demand.astype(float)
     agv_positions = [tuple(position) for position in data.agvs]
 
     _, _, selected_cache_indices, _, _, _ = solve_warehouse_layout(
@@ -604,37 +696,41 @@ def solve_multi_period(
     workload_rows: list[dict[str, object]] = []
     period_snapshots: list[dict[str, object]] = []
 
-    for period, wave in enumerate(waves, start=1):
-        released, unmet = allocate_wave(wave, available_inventory, sku_to_pallets)
-        if unmet > 1e-6:
-            raise RuntimeError(f"period {period} has unmet released demand {unmet:.6f}")
-        pending += released
+    period = 0
+    while float(np.sum(pending)) > 1e-8 and period < max_rounds:
+        period += 1
         active_indices = np.flatnonzero(pending > 1e-8)
-        if len(active_indices) == 0:
-            continue
-
         active_positions = [pallet_coords[int(idx)] for idx in active_indices]
-        active_quantities = pending[active_indices]
+        active_quantities = pending[active_indices].copy()
         service_costs, best_cache_indices = best_cache_paths(
             active_positions,
             selected_cache_positions,
             data.workstations,
         )
-        partition_result, flows, loads, partition_objective = solve_period_partition(
+        plan_result, planned_flows, station_loads, partition_objective = solve_round_processing_plan(
             active_quantities,
             service_costs,
-            alpha=alpha,
+            station_capacity=station_capacity,
+            agv_total_capacity=max_agvs * agv_capacity,
             verbose=verbose,
         )
-        main_station = np.argmax(flows, axis=1).astype(int)
-
-        assignment_result, assignments, assignment_cost = solve_period_assignment(
-            agv_positions,
-            active_positions,
-            main_station,
-            selected_cache_positions,
+        tasks = select_round_tasks(
+            active_quantities,
+            planned_flows,
             service_costs,
             best_cache_indices,
+            agv_capacity=agv_capacity,
+            station_capacity=station_capacity,
+            max_tasks=max_agvs,
+        )
+        if not tasks:
+            raise RuntimeError("no feasible task selected; check capacities")
+
+        assignment_result, assignments, assignment_cost = solve_round_assignment(
+            agv_positions,
+            active_positions,
+            tasks,
+            selected_cache_positions,
             data.workstations,
             verbose=verbose,
         )
@@ -642,10 +738,12 @@ def solve_multi_period(
         dispatched_global: list[int] = []
         route_snapshot_rows: list[dict[str, object]] = []
         next_agv_positions = list(agv_positions)
-        dispatched_local = {int(row["local_pallet_index"]) for row in assignments}
+        actual_station_loads = np.zeros(len(data.workstations), dtype=float)
+        processed_quantity = 0.0
 
+        selected_local = {int(row["local_pallet_index"]) for row in assignments}
         for local_index, global_index in enumerate(active_indices):
-            local_cache_index = int(best_cache_indices[local_index, main_station[local_index]])
+            local_cache_index = int(best_cache_indices[local_index, int(np.argmax(planned_flows[local_index]))])
             cache_global_index = int(selected_cache_indices[local_cache_index])
             cache_x, cache_y = selected_cache_positions[local_cache_index]
             workload_rows.append(
@@ -655,12 +753,13 @@ def solve_multi_period(
                     "pallet_id": pallet_ids[int(global_index)],
                     "x": pallet_coords[int(global_index)][0],
                     "y": pallet_coords[int(global_index)][1],
-                    "pending_quantity_before_dispatch": f"{pending[int(global_index)]:.8f}",
-                    "main_workstation_index": int(main_station[local_index]),
-                    "main_cache_pallet_index": cache_global_index,
-                    "main_cache_x": cache_x,
-                    "main_cache_y": cache_y,
-                    "dispatched": int(local_index in dispatched_local),
+                    "pending_quantity_before_round": f"{pending[int(global_index)]:.8f}",
+                    "planned_quantity_this_round": f"{float(np.sum(planned_flows[local_index])):.8f}",
+                    "planned_main_workstation_index": int(np.argmax(planned_flows[local_index])),
+                    "planned_main_cache_pallet_index": cache_global_index,
+                    "planned_main_cache_x": cache_x,
+                    "planned_main_cache_y": cache_y,
+                    "dispatched": int(local_index in selected_local),
                 }
             )
 
@@ -675,7 +774,13 @@ def solve_multi_period(
             pallet_x, pallet_y = pallet_coords[global_pallet_index]
             cache_x, cache_y = selected_cache_positions[local_cache_index]
             workstation_x, workstation_y = data.workstations[station_index]
-            request_quantity = float(pending[global_pallet_index])
+            process_quantity = min(
+                float(assignment["process_quantity"]),
+                float(pending[global_pallet_index]),
+            )
+            pending[global_pallet_index] -= process_quantity
+            processed_quantity += process_quantity
+            actual_station_loads[station_index] += process_quantity
             route_row = {
                 "period": period,
                 "agv_index": agv_index,
@@ -685,7 +790,8 @@ def solve_multi_period(
                 "pallet_id": pallet_ids[global_pallet_index],
                 "pallet_x": pallet_x,
                 "pallet_y": pallet_y,
-                "request_quantity": f"{request_quantity:.8f}",
+                "processed_quantity": f"{process_quantity:.8f}",
+                "remaining_quantity_after_route": f"{pending[global_pallet_index]:.8f}",
                 "cache_pallet_index": cache_global_index,
                 "cache_x": cache_x,
                 "cache_y": cache_y,
@@ -701,7 +807,7 @@ def solve_multi_period(
             route_snapshot_rows.append(
                 {
                     **route_row,
-                    "request_quantity": request_quantity,
+                    "processed_quantity": process_quantity,
                     "pickup_distance": float(assignment["pickup_distance"]),
                     "transfer_distance": float(assignment["transfer_distance"]),
                     "cache_to_workstation_distance": float(assignment["cache_to_workstation_distance"]),
@@ -709,42 +815,50 @@ def solve_multi_period(
                 }
             )
             dispatched_global.append(global_pallet_index)
-            pending[global_pallet_index] = 0.0
             next_agv_positions[agv_index] = (workstation_x, workstation_y)
 
-        backlog_indices = np.flatnonzero(pending > 1e-8)
+        pending = np.maximum(pending, 0.0)
+        remaining_indices = np.flatnonzero(pending > 1e-8)
+        nonzero_station_loads = actual_station_loads[actual_station_loads > 1e-8]
         summary = PeriodResult(
             period=period,
-            released_orders=len(wave),
-            released_quantity=float(np.sum(released)),
-            active_pallets=int(len(active_indices)),
+            active_pallets_before=int(len(active_indices)),
             dispatched_pallets=int(len(dispatched_global)),
-            backlog_pallets=int(len(backlog_indices)),
-            backlog_quantity_after=float(np.sum(pending)),
-            partition_status=partition_result.status,
-            partition_iterations=partition_result.iterations,
+            processed_quantity=float(processed_quantity),
+            remaining_pallets_after=int(len(remaining_indices)),
+            remaining_quantity_after=float(np.sum(pending)),
+            station_capacity=float(station_capacity),
+            agv_capacity=float(agv_capacity),
+            station_count_used=int(np.count_nonzero(actual_station_loads > 1e-8)),
+            partition_status=plan_result.status,
+            partition_iterations=plan_result.iterations,
             partition_objective=partition_objective,
             assignment_status=assignment_result.status,
             assignment_iterations=assignment_result.iterations,
             assignment_cost=assignment_cost,
-            min_station_load=float(np.min(loads)),
-            max_station_load=float(np.max(loads)),
+            min_station_processed=float(np.min(nonzero_station_loads)) if len(nonzero_station_loads) else 0.0,
+            max_station_processed=float(np.max(nonzero_station_loads)) if len(nonzero_station_loads) else 0.0,
         )
         summaries.append(summary)
         period_snapshots.append(
             {
                 "period": period,
-                "released_orders": len(wave),
                 "active_indices": active_indices.copy(),
                 "pending_quantities": active_quantities.copy(),
                 "dispatched_indices": np.asarray(dispatched_global, dtype=int),
                 "routes": route_snapshot_rows,
                 "agv_starts": np.asarray(agv_positions, dtype=float),
-                "backlog_pallets": summary.backlog_pallets,
-                "backlog_quantity_after": summary.backlog_quantity_after,
+                "processed_quantity": processed_quantity,
+                "remaining_pallets_after": summary.remaining_pallets_after,
+                "remaining_quantity_after": summary.remaining_quantity_after,
             }
         )
         agv_positions = next_agv_positions
+
+    if float(np.sum(pending)) > 1e-8:
+        raise RuntimeError(
+            f"reached max_rounds={max_rounds} with {float(np.sum(pending)):.6f} quantity remaining"
+        )
 
     write_summary(output_dir / "multi_period_summary.csv", summaries)
     write_rows(
@@ -758,7 +872,8 @@ def solve_multi_period(
             "pallet_id",
             "pallet_x",
             "pallet_y",
-            "request_quantity",
+            "processed_quantity",
+            "remaining_quantity_after_route",
             "cache_pallet_index",
             "cache_x",
             "cache_y",
@@ -780,11 +895,12 @@ def solve_multi_period(
             "pallet_id",
             "x",
             "y",
-            "pending_quantity_before_dispatch",
-            "main_workstation_index",
-            "main_cache_pallet_index",
-            "main_cache_x",
-            "main_cache_y",
+            "pending_quantity_before_round",
+            "planned_quantity_this_round",
+            "planned_main_workstation_index",
+            "planned_main_cache_pallet_index",
+            "planned_main_cache_x",
+            "planned_main_cache_y",
             "dispatched",
         ],
         workload_rows,
@@ -793,7 +909,6 @@ def solve_multi_period(
         data=data,
         period_snapshots=period_snapshots,
         selected_cache_indices=selected_cache_indices,
-        pallet_ids=pallet_ids,
         output=figure_path,
     )
     elapsed = time.perf_counter() - start
@@ -802,40 +917,47 @@ def solve_multi_period(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--periods", type=int, default=6)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--sample-prob", type=float, default=0.6)
     parser.add_argument("--max-agvs", type=int, default=12)
-    parser.add_argument("--alpha", type=float, default=0.6)
+    parser.add_argument("--agv-capacity", type=float, default=80.0)
+    parser.add_argument("--station-capacity", type=float, default=160.0)
     parser.add_argument("--choose-count", type=int, default=10)
     parser.add_argument("--min-distance", type=int, default=6)
+    parser.add_argument("--max-rounds", type=int, default=200)
     parser.add_argument("--output-dir", default="results")
     parser.add_argument("--figure", default="figures/multi_period_rolling_process.png")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
     summaries, route_rows, _, elapsed = solve_multi_period(
-        periods=args.periods,
         seed=args.seed,
         sample_prob=args.sample_prob,
         max_agvs=args.max_agvs,
-        alpha=args.alpha,
+        agv_capacity=args.agv_capacity,
+        station_capacity=args.station_capacity,
         choose_count=args.choose_count,
         min_distance=args.min_distance,
+        max_rounds=args.max_rounds,
         output_dir=Path(args.output_dir),
         figure_path=Path(args.figure),
         verbose=args.verbose,
     )
-    print("Multi-period rolling optimization")
-    print(f"periods={len(summaries)} routes={len(route_rows)} time={elapsed:.3f}s")
+    total_processed = sum(summary.processed_quantity for summary in summaries)
+    print("Multi-period rolling completion optimization")
+    print(
+        f"rounds={len(summaries)} routes={len(route_rows)} "
+        f"processed={total_processed:.3f} time={elapsed:.3f}s"
+    )
     for summary in summaries:
         print(
-            f"[t={summary.period}] orders={summary.released_orders} "
-            f"active={summary.active_pallets} dispatched={summary.dispatched_pallets} "
-            f"backlog={summary.backlog_pallets} "
+            f"[r={summary.period}] active={summary.active_pallets_before} "
+            f"dispatched={summary.dispatched_pallets} "
+            f"processed={summary.processed_quantity:.1f} "
+            f"remaining={summary.remaining_quantity_after:.1f} "
+            f"stations={summary.station_count_used} "
             f"partition={summary.partition_status}/{summary.partition_iterations} "
-            f"assignment={summary.assignment_status}/{summary.assignment_iterations} "
-            f"cost={summary.assignment_cost:.3f}"
+            f"assignment={summary.assignment_status}/{summary.assignment_iterations}"
         )
     print(f"wrote {Path(args.output_dir) / 'multi_period_summary.csv'}")
     print(f"wrote {Path(args.output_dir) / 'multi_period_routes.csv'}")
