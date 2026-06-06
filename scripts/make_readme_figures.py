@@ -83,6 +83,11 @@ def configure_style() -> None:
             "axes.edgecolor": COLORS["edge"],
             "axes.labelcolor": COLORS["text"],
             "axes.titlecolor": COLORS["text"],
+            "axes.titleweight": "bold",
+            "axes.labelweight": "semibold",
+            "font.size": 12,
+            "xtick.labelsize": 12,
+            "ytick.labelsize": 12,
             "xtick.color": COLORS["muted"],
             "ytick.color": COLORS["muted"],
             "axes.grid": True,
@@ -97,11 +102,26 @@ def setup_map_axis(ax: plt.Axes, data) -> None:
     ax.set_xlim(-1, data.ncols)
     ax.set_ylim(-1, data.nrows)
     ax.set_aspect("equal", adjustable="box")
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
+    ax.set_xlabel("X", fontsize=13, fontweight="semibold", labelpad=8)
+    ax.set_ylabel("Y", fontsize=13, fontweight="semibold", labelpad=8)
     ax.set_xticks(np.arange(0, data.ncols + 1, 4))
     ax.set_yticks(np.arange(0, data.nrows + 1, 4))
     ax.spines[["top", "right"]].set_visible(False)
+
+
+def place_legend(ax: plt.Axes, *, columns: int, y: float = -0.08) -> None:
+    ax.legend(
+        loc="upper center",
+        bbox_to_anchor=(0.5, y),
+        ncol=columns,
+        frameon=True,
+        facecolor="white",
+        edgecolor=COLORS["edge"],
+        framealpha=0.96,
+        prop={"size": 11, "weight": "semibold"},
+        handlelength=2.2,
+        columnspacing=1.3,
+    )
 
 
 def scatter_nodes(ax: plt.Axes, data, *, alpha: float = 0.20) -> None:
@@ -116,13 +136,6 @@ def scatter_nodes(ax: plt.Axes, data, *, alpha: float = 0.20) -> None:
         "4": COLORS["connector"],
         "5": COLORS["workstation"],
     }
-    labels = {
-        "1": "通道节点",
-        "2": "货位节点",
-        "3": "充电桩",
-        "4": "连接节点",
-        "5": "工位",
-    }
     for node_type in sorted(set(types)):
         mask = types == node_type
         ax.scatter(
@@ -132,7 +145,7 @@ def scatter_nodes(ax: plt.Axes, data, *, alpha: float = 0.20) -> None:
             c=colors.get(node_type, COLORS["edge"]),
             alpha=alpha if node_type != "5" else 0.85,
             linewidths=0,
-            label=labels.get(node_type, f"节点 {node_type}"),
+            label="_nolegend_",
         )
 
 
@@ -142,7 +155,7 @@ def add_metric(ax: plt.Axes, y: float, label: str, value: str, color: str) -> No
         y,
         value,
         transform=ax.transAxes,
-        fontsize=24,
+        fontsize=28,
         fontweight="bold",
         color=color,
         va="center",
@@ -152,7 +165,8 @@ def add_metric(ax: plt.Axes, y: float, label: str, value: str, color: str) -> No
         y - 0.075,
         label,
         transform=ax.transAxes,
-        fontsize=11,
+        fontsize=12.5,
+        fontweight="semibold",
         color=COLORS["muted"],
         va="center",
     )
@@ -202,11 +216,11 @@ def draw_background_overview() -> None:
         label="AGV",
     )
     setup_map_axis(ax_map, data)
-    ax_map.set_title("仓库网格、AGV、托盘与工位", fontsize=17, fontweight="bold", pad=12)
-    ax_map.legend(loc="upper left", frameon=True, facecolor="white", framealpha=0.95)
+    ax_map.set_title("仓库网格、AGV、托盘与工位", fontsize=20, fontweight="bold", pad=14)
+    place_legend(ax_map, columns=3, y=-0.08)
 
     ax_info.axis("off")
-    ax_info.set_title("实验数据总览", loc="left", fontsize=17, fontweight="bold", pad=12)
+    ax_info.set_title("实验数据总览", loc="left", fontsize=20, fontweight="bold", pad=14)
     add_metric(ax_info, 0.86, "地图节点（通道/货位/工位等）", f"{len(data.nodes)}", COLORS["text"])
     add_metric(ax_info, 0.70, "托盘候选位置", f"{len(data.pallets)}", COLORS["pallet"])
     add_metric(ax_info, 0.54, "实验采样 AGV", f"{len(data.agvs)}", COLORS["agv"])
@@ -218,11 +232,12 @@ def draw_background_overview() -> None:
         f"托盘总货量：{int(data.pallet_quantities.sum())}  |  "
         f"仓库尺寸：{data.ncols} x {data.nrows}",
         transform=ax_info.transAxes,
-        fontsize=12,
+        fontsize=13,
+        fontweight="semibold",
         color=COLORS["muted"],
     )
 
-    fig.suptitle("AGV 仓储优化：实体与数据", fontsize=24, fontweight="bold", y=0.985)
+    fig.suptitle("AGV 仓储优化：实体与数据", fontsize=30, fontweight="bold", y=0.992)
     fig.savefig(FIG_DIR / "background_data_overview.png", bbox_inches="tight")
     plt.close(fig)
 
@@ -263,19 +278,22 @@ def draw_task1_assignment() -> None:
         ax.scatter([pallet[0]], [pallet[1]], s=90, c=COLORS["pallet"], edgecolors="white", linewidths=0.9)
 
     setup_map_axis(ax, data)
-    ax.set_title("任务 1：AGV -> 托盘 -> 工位 的搬运分配", fontsize=18, fontweight="bold", pad=12)
+    ax.set_title("任务 1：AGV -> 托盘 -> 工位 的搬运分配", fontsize=22, fontweight="bold", pad=14)
     ax.text(
-        0.02,
-        0.02,
+        0.5,
+        -0.115,
         f"展示前 {len(shown)} 条路线；虚线为取货距离，实线为送达距离；全部 {len(assignments)} 条分配写入 results/agv_assignment.csv",
         transform=ax.transAxes,
-        fontsize=11,
+        ha="center",
+        va="top",
+        fontsize=12,
         color=COLORS["text"],
         bbox={"boxstyle": "round,pad=0.45", "facecolor": "white", "edgecolor": COLORS["edge"], "alpha": 0.94},
+        clip_on=False,
     )
     ax.plot([], [], color=COLORS["route_pickup"], linestyle="--", linewidth=2.2, label="取货路径")
     ax.plot([], [], color=COLORS["route_delivery"], linewidth=2.2, label="送达路径")
-    ax.legend(loc="upper left", frameon=True, facecolor="white", framealpha=0.95)
+    place_legend(ax, columns=5, y=-0.055)
     fig.savefig(FIG_DIR / "task1_agv_assignment.png", bbox_inches="tight")
     plt.close(fig)
 
@@ -303,19 +321,28 @@ def draw_task2_partition() -> None:
         for idx in station_for_pallet
     ]
     sizes = np.clip(data.pallet_quantities / 1.6, 24, 120)
-    ax_map.scatter(pallets[:, 0], pallets[:, 1], s=sizes, c=colors, alpha=0.78, edgecolors="white", linewidths=0.5)
+    ax_map.scatter(
+        pallets[:, 0],
+        pallets[:, 1],
+        s=sizes,
+        c=colors,
+        alpha=0.78,
+        edgecolors="white",
+        linewidths=0.5,
+        label="托盘（颜色=主服务工位）",
+    )
     ax_map.scatter(workstations[:, 0], workstations[:, 1], s=150, c=COLORS["workstation"], marker="s", edgecolors="white", linewidths=1.0, label="工位")
     for idx, (x, y) in enumerate(data.workstations):
-        ax_map.text(x + 0.24, y + 0.24, str(idx), fontsize=8, color=COLORS["text"], weight="bold")
+        ax_map.text(x + 0.24, y + 0.24, str(idx), fontsize=9.5, color=COLORS["text"], weight="bold")
     setup_map_axis(ax_map, data)
-    ax_map.set_title("任务 2：托盘货量按主服务工位形成动态分区", fontsize=18, fontweight="bold", pad=12)
-    ax_map.legend(loc="upper left", frameon=True, facecolor="white", framealpha=0.95)
+    ax_map.set_title("任务 2：托盘货量按主服务工位形成动态分区", fontsize=22, fontweight="bold", pad=14)
+    place_legend(ax_map, columns=2, y=-0.08)
 
     loads = loads.sort_values("workstation_index")
     ax_bar.barh(loads["workstation_index"].astype(str), loads["quantity"], color=COLORS["workload"], alpha=0.82)
-    ax_bar.set_title("各工位获得货量", fontsize=15, fontweight="bold", pad=10)
-    ax_bar.set_xlabel("Quantity")
-    ax_bar.set_ylabel("Workstation")
+    ax_bar.set_title("各工位获得货量", fontsize=18, fontweight="bold", pad=12)
+    ax_bar.set_xlabel("Quantity", fontsize=13, fontweight="semibold", labelpad=8)
+    ax_bar.set_ylabel("Workstation", fontsize=13, fontweight="semibold", labelpad=8)
     ax_bar.spines[["top", "right"]].set_visible(False)
     ax_bar.invert_yaxis()
     ax_bar.text(
@@ -323,7 +350,7 @@ def draw_task2_partition() -> None:
         -0.10,
         "颜色表示托盘主要分配给哪个工位；柱状图用于观察负载水平。",
         transform=ax_bar.transAxes,
-        fontsize=10.5,
+        fontsize=11.5,
         color=COLORS["muted"],
     )
 
@@ -366,17 +393,17 @@ def draw_task3_layout() -> None:
         diamond_y = [y + radius, y, y - radius, y, y + radius]
         ax_map.plot(diamond_x, diamond_y, color=COLORS["selected"], alpha=0.24, linewidth=1.2)
     setup_map_axis(ax_map, data)
-    ax_map.set_title("任务 3：从候选货位中选择分散的重点缓存/中转位置", fontsize=18, fontweight="bold", pad=12)
-    ax_map.legend(loc="upper left", frameon=True, facecolor="white", framealpha=0.95)
+    ax_map.set_title("任务 3：从候选货位中选择分散的重点缓存/中转位置", fontsize=22, fontweight="bold", pad=14)
+    place_legend(ax_map, columns=2, y=-0.08)
 
     ax_table.axis("off")
-    ax_table.set_title("选中结果", loc="left", fontsize=17, fontweight="bold", pad=12)
+    ax_table.set_title("选中结果", loc="left", fontsize=20, fontweight="bold", pad=14)
     ax_table.text(
         0.02,
         0.90,
         f"选中数量：{len(selected_idx)}\n最小曼哈顿距离：{int(min_pair)}\n约束要求：距离 > 6",
         transform=ax_table.transAxes,
-        fontsize=14,
+        fontsize=15,
         color=COLORS["text"],
         linespacing=1.7,
     )
@@ -393,7 +420,7 @@ def draw_task3_layout() -> None:
         bbox=[0.02, 0.08, 0.82, 0.66],
     )
     table.auto_set_font_size(False)
-    table.set_fontsize(10)
+    table.set_fontsize(11)
     for cell in table.get_celld().values():
         cell.set_edgecolor(COLORS["grid"])
         cell.set_linewidth(0.6)
