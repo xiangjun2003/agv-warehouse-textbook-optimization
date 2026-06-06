@@ -77,22 +77,32 @@ Distance is defined as:
 dist(a, b) = |x_a - x_b| + |y_a - y_b|
 ```
 
-### Visual Color Rules
+### Entity Legend and Visual Annotation Rules
 
-All README figures use a consistent visual language:
+All README figure legends now show only warehouse entities defined by this
+project. Routes, color encodings, and constraint notes are described as visual
+annotations instead of being mixed into the entity legend.
 
-| Meaning | Color in figures | Explanation |
+Entity legends use the following vocabulary:
+
+| Entity | Color in figures | Explanation |
 | --- | --- | --- |
 | AGV | blue triangle | vehicle position or vehicle starting point |
 | Pallet | green circle | existing pallet location; point size often represents quantity |
 | Workstation | red square | picking, packing, processing, inspection, or temporary handling point |
 | Candidate location | light-blue circle | candidate location in Task 3 |
-| Selected cache/transfer location | orange diamond | final selected location in Task 3 |
-| Pickup/delivery route | blue dashed line / orange solid line | AGV-to-pallet and pallet-to-workstation distance in Task 1 |
+| Cache/transfer point | orange diamond | final selected cache or transfer location in Task 3 |
 
-Task 2 uses an additional fixed categorical palette to show which workstation
-mainly serves each pallet. The workstation markers remain red, and the workload
-bars remain green.
+Visual annotations are not entities:
+
+- Task 1 uses blue dashed and orange solid lines only to explain the
+  `AGV -> pallet` and `pallet -> workstation` route segments.
+- Task 2 uses pallet colors to show each pallet's main serving workstation,
+  which forms the dynamic workstation service area. A warehouse area is not a
+  fixed physical marker, so it is not placed in the entity legend.
+- Background map nodes such as aisles, storage nodes, charging nodes, and
+  connection nodes show map structure only; they are not separate decision
+  entities in this project.
 
 ### Dataset Details
 

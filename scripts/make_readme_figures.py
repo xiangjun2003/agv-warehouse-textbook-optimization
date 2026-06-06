@@ -321,7 +321,7 @@ def draw_task1_assignment() -> None:
         alpha=0.86,
         edgecolors="white",
         linewidths=0.4,
-        label="未选托盘",
+        label="_nolegend_",
         zorder=3,
     )
 
@@ -397,20 +397,19 @@ def draw_task1_assignment() -> None:
 
     ax_info.set_title("图例与说明", loc="left", fontsize=20, fontweight="bold", pad=14)
     task1_handles = [
-        marker_handle("o", COLORS["pallet_light"], "未选托盘", size=9),
+        marker_handle("o", COLORS["pallet"], "托盘", size=9),
         marker_handle("s", COLORS["workstation"], "工位", size=11),
         marker_handle("^", COLORS["agv"], "AGV", size=11),
-        line_handle(COLORS["route_pickup"], "取货路径", linestyle="--"),
-        line_handle(COLORS["route_delivery"], "送达路径"),
     ]
     panel_legend(ax_info, task1_handles, y=0.92)
     ax_info.text(
         0.04,
-        0.44,
+        0.50,
+        "辅助标注\n"
         f"展示路线：前 {len(shown)} 条\n"
         f"完整分配：{len(assignments)} 条\n"
-        "虚线：AGV 到托盘\n"
-        "实线：托盘到工位",
+        "蓝色虚线：AGV 到托盘\n"
+        "橙色实线：托盘到工位",
         transform=ax_info.transAxes,
         fontsize=13,
         fontweight="semibold",
@@ -425,7 +424,7 @@ def draw_task1_assignment() -> None:
     )
     ax_info.text(
         0.04,
-        0.18,
+        0.19,
         "结果文件\nresults/agv_assignment.csv",
         transform=ax_info.transAxes,
         fontsize=12,
@@ -468,14 +467,39 @@ def draw_task2_partition() -> None:
         alpha=0.78,
         edgecolors="white",
         linewidths=0.5,
-        label="托盘（颜色=主服务工位）",
+        label="_nolegend_",
     )
-    ax_map.scatter(workstations[:, 0], workstations[:, 1], s=150, c=COLORS["workstation"], marker="s", edgecolors="white", linewidths=1.0, label="工位")
+    ax_map.scatter(
+        workstations[:, 0],
+        workstations[:, 1],
+        s=150,
+        c=COLORS["workstation"],
+        marker="s",
+        edgecolors="white",
+        linewidths=1.0,
+        label="_nolegend_",
+    )
     for idx, (x, y) in enumerate(data.workstations):
         ax_map.text(x + 0.24, y + 0.24, str(idx), fontsize=9.5, color=COLORS["text"], weight="bold")
     setup_map_axis(ax_map, data)
     ax_map.set_title("任务 2：托盘货量按主服务工位形成动态分区", fontsize=22, fontweight="bold", pad=14)
-    place_legend(ax_map, columns=2, y=-0.08)
+    task2_handles = [
+        marker_handle("o", COLORS["pallet"], "托盘", size=9),
+        marker_handle("s", COLORS["workstation"], "工位", size=11),
+    ]
+    ax_map.legend(
+        handles=task2_handles,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.08),
+        ncol=2,
+        frameon=True,
+        facecolor="white",
+        edgecolor=COLORS["edge"],
+        framealpha=0.96,
+        prop={"size": 11, "weight": "semibold"},
+        handlelength=2.2,
+        columnspacing=1.3,
+    )
 
     loads = loads.sort_values("workstation_index")
     ax_bar.barh(loads["workstation_index"].astype(str), loads["quantity"], color=COLORS["workload"], alpha=0.82)
@@ -487,7 +511,7 @@ def draw_task2_partition() -> None:
     ax_bar.text(
         0.02,
         -0.10,
-        "颜色表示托盘主要分配给哪个工位；柱状图用于观察负载水平。",
+        "辅助标注：托盘颜色表示主服务工位，也就是动态形成的工位服务区域。",
         transform=ax_bar.transAxes,
         fontsize=11.5,
         color=COLORS["muted"],
@@ -534,7 +558,7 @@ def draw_task3_layout() -> None:
         edgecolors=COLORS["text"],
         linewidths=1.2,
         marker="D",
-        label="选中重点位置",
+        label="重点缓存/中转点",
         zorder=6,
     )
     setup_map_axis(ax_map, data)
@@ -563,7 +587,7 @@ def draw_task3_layout() -> None:
     )
     task3_handles = [
         marker_handle("o", COLORS["candidate"], "候选货位", size=10),
-        marker_handle("D", COLORS["selected"], "选中重点位置", size=12),
+        marker_handle("D", COLORS["selected"], "重点缓存/中转点", size=12),
     ]
     panel_legend(ax_table, task3_handles, y=0.51)
     rows = [
