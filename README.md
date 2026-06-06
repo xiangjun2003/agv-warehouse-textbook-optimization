@@ -1,333 +1,266 @@
-# AGV Warehouse Optimization Course Project
+# AGV 仓储优化课程项目
 
-This repository contains a complete AGV warehouse optimization course project.
-It uses local CSV data, automated model-building scripts, and
-self-implemented textbook optimization algorithms to solve three warehouse
-decision tasks: AGV assignment, dynamic partitioning, and cache/transfer
-location selection.
+语言：中文 | [English](README.en.md)
 
-The README follows the same narrative order as the presentation: background,
-entities and data, task meaning, modeling, textbook algorithm mapping,
-experiment setup, and result analysis.
+这个仓库是一个完整的 AGV 仓储优化课程项目。项目使用本地 CSV 数据、自动化建模脚本和我们自己实现的教材优化算法，完成三个仓储决策实验：AGV 搬运分配、动态分区、重点缓存货位选择。
 
-## 1. Background, Entities, and Data
+README 按演示汇报的顺序展开：先讲背景、实体和数据，再讲三个任务的实际意义、建模方式、教材章节对应算法、实验设置和结果分析。
 
-In an automated warehouse, AGVs move pallets through a grid of aisles and
-nodes. The system needs more than vehicles that can move: it needs dispatching
-that avoids unnecessary travel, workstation service areas that keep workloads
-stable, and cache or transfer positions that do not become overly concentrated.
+## 1. 实验背景、仓库实体与数据
 
-![Background and data overview](figures/background_data_overview.png)
+自动化仓库中，AGV 负责在仓库网格和通道上搬运托盘。一个实际仓储系统不只是让车辆“能动起来”，还要解决三个更具体的问题：车辆如何少走路、工位如何稳定获得货量、重点缓存或中转位置如何布局得更合理。
 
-The project uses the following warehouse entities:
+![实验背景与数据总览](figures/background_data_overview.png)
 
-- **AGV**: an automated guided vehicle. In Task 1, an AGV moves from its
-  current position to a pallet, picks it, and delivers it to a workstation.
-- **Pallet**: a standardized load unit. `pallets.csv` gives each pallet's
-  coordinate, pallet ID, and SKU quantities. The model aggregates SKU
-  quantities into a total pallet quantity.
-- **Workstation**: a processing point such as picking, packing, inspection, or
-  temporary handling. Nodes with type `5` in `map.csv` are read as
-  workstations.
-- **Warehouse area**: in Task 2, an area is not a fixed room. It is the service
-  range formed by assigning pallet quantities to workstations.
-- **Candidate storage/cache position**: in Task 3, candidate positions are
-  existing pallet/storage coordinates that may be selected as important cache
-  or transfer locations.
-- **Aisle/key node**: road nodes, storage nodes, charging nodes, connection
-  nodes, and workstations describe the warehouse grid. The current models use
-  Manhattan distance as a grid-travel approximation.
+本项目涉及的实体如下：
 
-Distance is defined as:
+- **AGV**：自动导引运输车，是仓库中的无人搬运资源。任务 1 中，AGV 从当前位置出发，到某个托盘位置取货，再把托盘送到工位。
+- **托盘**：承载货物的标准单元。`pallets.csv` 中每个托盘有坐标、托盘编号，以及若干 SKU 的数量；模型把 SKU 数量加总为托盘货量。
+- **工位**：仓库或生产线中的作业位置，可以理解为拣选、包装、加工、检验或临时处理点。`map.csv` 中类型为 `5` 的节点被读取为工位。
+- **仓库区域**：任务 2 中的区域不是提前画好的固定房间，而是模型根据“托盘货量分给哪个工位”自动形成的服务范围。
+- **候选货位**：任务 3 中可以被选为重点缓存或中转点的备选位置。当前实验把已有托盘/货位坐标作为候选点。
+- **通道/关键节点**：`map.csv` 中的道路节点、货位节点、充电桩、连接节点和工位共同描述仓库网格结构。当前模型用曼哈顿距离近似 AGV 在网格通道中的行驶距离。
+
+距离定义为：
 
 ```text
 dist(a, b) = |x_a - x_b| + |y_a - y_b|
 ```
 
-The data files are:
+本项目使用的数据如下：
 
-| File | Contents | Role in the project |
+| 文件 | 内容 | 在项目中的作用 |
 | --- | --- | --- |
-| `data/map.csv` | node type, node coordinates, workstation coordinates | builds the warehouse grid, reads workstations, and supports distance calculation |
-| `data/pallets.csv` | pallet coordinates, pallet ID, SKU:quantity lists | provides pallet positions, candidate locations, and pallet quantities |
-| `data/bots.csv` | AGV ID, current position, direction | provides AGV starting positions for Task 1 |
-| `data/orders.csv` | order ID, SKU, demand quantity, received time, deadline | represents the business-demand background; the current models optimize from pallet inventory and coordinates, and the order data can support later order-level dispatching |
+| `data/map.csv` | 仓库节点类型、节点坐标、工位坐标 | 建立仓库网格，读取工位，支撑三个任务的距离计算 |
+| `data/pallets.csv` | 托盘坐标、托盘编号、SKU:数量列表 | 提供托盘位置、候选货位和托盘货量 |
+| `data/bots.csv` | AGV 编号、当前位置、方向 | 任务 1 的车辆起点数据 |
+| `data/orders.csv` | 订单编号、SKU、需求量、接收时间、截止时间 | 表示业务需求背景；当前三个数学模型直接使用托盘库存和坐标，订单数据可用于后续扩展为按订单调度 |
 
-In the default experiment, Task 1 uses a fixed random seed to sample 12
-available AGVs for one dispatching batch. The randomness only creates a
-reproducible experimental batch; it does not change the pallet, workstation, or
-map data.
+默认实验中，任务 1 使用固定随机种子从可用 AGV 中抽取 12 辆参与一个调度批次。这对应现实中的“当前批次在线车辆/可调度车辆抽样”，随机数只用于构造可复现的实验批次，不会改变托盘、工位和仓库地图数据。
 
-## 2. Project Content
+## 2. 项目内容
 
-The project contains three optimization tasks:
+项目包含三个优化任务：
 
-1. **AGV assignment**: decide which AGV serves which pallet and which
-   workstation receives it.
-2. **Dynamic partitioning**: decide how much quantity from each pallet is
-   assigned to each workstation, forming workstation service areas.
-3. **Cache/transfer location selection**: choose important cache or transfer
-   positions from candidate storage locations.
+1. **AGV 任务分配**：决定哪辆 AGV 去搬哪个托盘，并送到哪个工位。
+2. **动态分区**：决定每个托盘的货量由哪些工位处理，从而形成工位服务区域。
+3. **重点缓存货位选择**：从候选货位中选出一组适合作为重点缓存或中转的位置。
 
-These tasks correspond to three warehouse decision levels: daily dispatching,
-area organization, and layout planning.
+这三个任务对应仓库运行的三个层面：当天调度、区域组织和布局规划。它们不是同一个问题的重复求解，而是从短期搬运到中长期布局的递进。
 
-## 3. Automated Modeling and Solving Workflow
+## 3. 自动化建模与求解流程
 
-The workflow is automated. Running `python run_all.py` reads the data, builds
-distance matrices, constructs objective vectors and constraint matrices, calls
-the textbook algorithms, and writes results into `results/`.
+整个项目已经自动化实现。运行 `python run_all.py` 后，程序会依次读取数据、构造距离矩阵、生成目标函数和约束矩阵、调用教材算法求解，并把结果写入 `results/`。
 
 ```text
-CSV data
-  -> warehouse_data.py reads coordinates, quantities, AGVs, and workstations
-  -> solve_*.py builds objective vectors and constraint matrices
-  -> algorithms/*.py solves the models with textbook algorithms
-  -> results/*.csv stores experiment outputs
+CSV 数据
+  -> warehouse_data.py 读取坐标、货量、AGV、工位
+  -> solve_*.py 构造目标向量和约束矩阵
+  -> algorithms/*.py 调用教材算法求解
+  -> results/*.csv 输出实验结果
 ```
 
-Repository structure:
+仓库结构：
 
 ```text
-data/                         local warehouse CSV data
-figures/                      figures used in this README
-algorithms/                   self-implemented textbook algorithms
-warehouse_data.py              data loading and distance matrix construction
-solve_agv_assignment.py        Task 1 model builder and solver
-solve_dynamic_partition.py     Task 2 model builder and solver
-solve_warehouse_layout.py      Task 3 model builder and solver
-run_all.py                     one-click reproduction entry point
-results/                       generated CSV outputs
-scripts/make_readme_figures.py README figure generation script
+data/                         本地仓库 CSV 数据
+figures/                      README 中使用的实验示意图
+algorithms/                   教材算法的 Python 实现
+warehouse_data.py              数据读取与距离矩阵构造
+solve_agv_assignment.py        任务 1：AGV 任务分配
+solve_dynamic_partition.py     任务 2：动态分区
+solve_warehouse_layout.py      任务 3：重点缓存货位选择
+run_all.py                     一键运行三个实验
+results/                       输出 CSV 结果
+scripts/make_readme_figures.py README 配图生成脚本
 ```
 
-Default problem sizes:
+默认问题规模：
 
-| Task | Default size |
+| 任务 | 默认规模 |
 | --- | --- |
-| Task 1 | 12 AGVs, 140 pallets, 18 workstations; 4498 LP variables and 450 equality constraints |
-| Task 2 | 140 pallets and 18 workstations; 2538 LP variables and 158 equality constraints |
-| Task 3 | select 10 locations from 140 candidates; 140 continuous relaxation variables and 2165 spatial conflict edges |
+| 任务 1 | 12 辆 AGV、140 个托盘、18 个工位；线性规划 4498 个变量、450 条等式约束 |
+| 任务 2 | 140 个托盘、18 个工位；线性规划 2538 个变量、158 条等式约束 |
+| 任务 3 | 140 个候选货位中选 10 个；连续松弛 140 个变量、2165 条空间冲突边 |
 
-## 4. Task 1: AGV Assignment
+## 4. 任务 1：AGV 任务分配
 
-![Task 1 AGV assignment](figures/task1_agv_assignment.png)
+![任务 1：AGV 任务分配](figures/task1_agv_assignment.png)
 
-### Meaning
+### 实际意义
 
-Task 1 answers: **which AGV should move which pallet, and where should it be
-sent?**
-
-A result row can be read as:
+任务 1 解决“谁去搬、搬到哪里”的问题。一条结果可以读成：
 
 ```text
-AGV i moves from its current position, picks pallet j, and delivers it to workstation k.
+AGV i 从当前位置出发，到托盘 j 取货，再把托盘 j 送到工位 k。
 ```
 
-Poor assignment causes empty travel, detours, and workstation waiting. A good
-assignment reduces pickup and delivery distance for the current dispatching
-batch.
+如果分配不好，AGV 会产生额外空驶、绕路和工位等待；如果分配合理，可以降低取货与送货距离，提高当前调度批次的执行效率。
 
-### Model
+### 建模方法
 
-One movement is split into two distance components:
+一次搬运被拆成两段距离：
 
 ```text
-AGV -> pallet
-pallet -> workstation
+AGV -> 托盘
+托盘 -> 工位
 ```
 
-Decision variables:
+决策变量：
 
 ```text
-x(i,j): whether AGV i serves pallet j
-y(j,k): whether pallet j is delivered to workstation k
+x(i,j)：AGV i 是否服务托盘 j
+y(j,k)：托盘 j 是否送到工位 k
 ```
 
-Objective:
+目标函数：
 
 ```text
 min sum d(AGV_i, pallet_j) x(i,j)
   + sum d(pallet_j, workstation_k) y(j,k)
 ```
 
-Main constraints:
+主要约束包括：
 
-- each sampled AGV receives one transport task;
-- each pallet is picked by at most one AGV;
-- pickup and delivery decisions must be consistent;
-- each workstation has a receiving-capacity limit.
+- 每辆参与实验的 AGV 分配一个搬运任务；
+- 每个托盘最多被一辆 AGV 取走；
+- 取货和送达必须保持一致；
+- 每个工位接收的托盘数不超过容量上限。
 
-### Textbook Algorithm
+### 教材算法
 
-Task 1 is formulated as a linear-programming relaxation and solved with the
-**Chapter 7 primal-dual interior-point method for linear programming**. The
-implementation is in `algorithms/primal_dual_lp.py`.
+任务 1 被构造成线性规划松弛，使用 **教材第 7 章：线性规划的原始-对偶内点法** 求解。代码位于 `algorithms/primal_dual_lp.py`。
 
-The solver handles:
+内点法求解的是：
 
 ```text
 min c^T x
 s.t. A x = b, x >= 0
 ```
 
-It maintains primal variables `x`, dual variables `y`, and slacks `s`, and uses
-Newton directions to reduce primal residual, dual residual, and complementarity
-gap. After solving the relaxation, `solve_agv_assignment.py` recovers an
-executable integer AGV-pallet-workstation assignment.
+算法维护原变量 `x`、对偶变量 `y` 和松弛变量 `s`，通过牛顿方向逐步降低原始残差、对偶残差和互补间隙。得到连续解后，`solve_agv_assignment.py` 会执行整数恢复，把松弛解转成可执行的 AGV-托盘-工位三元组。
 
-### Output
+### 输出结果
 
-`results/agv_assignment.csv`:
+`results/agv_assignment.csv`：
 
 ```text
 agv_index,pallet_index,workstation_index,cost
 ```
 
-The `cost` is the Manhattan distance from AGV to pallet plus pallet to
-workstation.
+其中 `cost` 是该 AGV 从当前位置到托盘、再到工位的曼哈顿距离之和。
 
-## 5. Task 2: Dynamic Partitioning
+## 5. 任务 2：动态分区
 
-![Task 2 dynamic partitioning](figures/task2_dynamic_partition.png)
+![任务 2：动态分区](figures/task2_dynamic_partition.png)
 
-### Meaning
+### 实际意义
 
-Task 2 answers: **which workstation should process each pallet's quantity?**
+任务 2 解决“每个托盘的货量由哪个工位处理”的问题。它和任务 1 不同：任务 1 是车辆和搬运任务匹配，任务 2 是托盘货量和工位服务范围匹配。
 
-This is different from Task 1. Task 1 matches vehicles to transport jobs; Task
-2 assigns pallet quantities to workstation service ranges.
+动态分区的现实含义是：不提前固定每个工位服务哪一块区域，而是根据托盘位置、托盘货量和工位位置，计算每个工位应该承担哪些货量。这样既能控制总运输距离，又能避免某些工位负载过低。
 
-The practical meaning is that service areas are generated by the model instead
-of being fixed in advance. The model considers pallet location, pallet
-quantity, and workstation location, while also keeping each workstation above a
-minimum workload level.
+### 建模方法
 
-### Model
-
-Decision variable:
+决策变量：
 
 ```text
-z(j,k): quantity from pallet j assigned to workstation k
+z(j,k)：托盘 j 分给工位 k 的货量
 ```
 
-Parameters:
+参数：
 
 ```text
-q(j): total quantity of pallet j
-d(j,k): Manhattan distance from pallet j to workstation k
+q(j)：托盘 j 的总货量
+d(j,k)：托盘 j 到工位 k 的曼哈顿距离
 ```
 
-Objective:
+目标函数：
 
 ```text
 min sum d(j,k) z(j,k)
 ```
 
-Main constraints:
+主要约束包括：
 
-- each pallet's quantity is fully assigned: `sum_k z(j,k) = q(j)`;
-- each workstation receives at least a minimum workload:
-  `sum_j z(j,k) >= alpha * total_quantity / K`;
-- all quantity flows are nonnegative: `z(j,k) >= 0`.
+- 每个托盘的货量必须全部分配出去：`sum_k z(j,k) = q(j)`；
+- 每个工位至少获得一定货量：`sum_j z(j,k) >= alpha * total_quantity / K`；
+- 所有货量流非负：`z(j,k) >= 0`。
 
-### Textbook Algorithm
+### 教材算法
 
-Task 2 is a standard linear program and is solved directly with the **Chapter 7
-primal-dual interior-point method**. The implementation is also
-`algorithms/primal_dual_lp.py`.
+任务 2 是标准线性规划，直接使用 **教材第 7 章：线性规划的原始-对偶内点法**。代码同样位于 `algorithms/primal_dual_lp.py`。
 
-No integer recovery is needed because `z(j,k)` is a continuous quantity flow.
-The solution directly tells how much quantity from each pallet is assigned to
-each workstation.
+这个任务不需要整数恢复，因为 `z(j,k)` 表示连续货量流。求解结果可以直接解释为“托盘 j 有多少货量交给工位 k 处理”。
 
-### Output
+### 输出结果
 
-`results/dynamic_partition.csv`:
+`results/dynamic_partition.csv`：
 
 ```text
 pallet_index,workstation_index,quantity
 ```
 
-Summing `quantity` by workstation gives the workstation workload.
+每一行表示一个托盘到一个工位的货量分配。把同一工位收到的 `quantity` 加总，就能得到工位负载。
 
-## 6. Task 3: Cache/Transfer Location Selection
+## 6. 任务 3：重点缓存货位选择
 
-![Task 3 warehouse layout selection](figures/task3_warehouse_layout.png)
+![任务 3：重点缓存货位选择](figures/task3_warehouse_layout.png)
 
-### Meaning
+### 实际意义
 
-Task 3 answers: **which locations should become important cache or transfer
-positions?**
+任务 3 解决“哪些位置值得被选为重点缓存或中转点”的问题。前两个任务中托盘位置是固定输入；任务 3 中，候选货位本身仍来自已有仓库坐标，但“哪些候选位置被重点使用”是需要模型决定的。
 
-In Tasks 1 and 2, pallet positions are fixed inputs. In Task 3, candidate
-positions still come from existing warehouse coordinates, but the selected
-important positions are decision variables.
+这不是重新摆放所有托盘，而是做布局层面的选址：从 140 个候选货位中选出 10 个点，作为高频暂存、工位前补货、AGV 中转或出库前缓存的位置。模型要求这些重点位置不能过度集中，否则容易造成局部拥堵。
 
-This is a layout-level selection problem. The experiment selects 10 positions
-from 140 candidate storage locations for high-frequency temporary storage,
-workstation replenishment, AGV transfer, or pre-shipping staging. The selected
-locations must not be overly concentrated, otherwise they can create local
-congestion.
+### 建模方法
 
-### Model
-
-Decision variable:
+决策变量：
 
 ```text
-x(i) in {0, 1}: whether candidate location i is selected
+x(i) in {0, 1}：候选货位 i 是否被选中
 ```
 
-Cardinality constraint:
+数量约束：
 
 ```text
 sum_i x(i) = 10
 ```
 
-Spacing constraint:
+间距约束：
 
 ```text
 x(i) + x(j) <= 1, if dist(i,j) <= 6
 ```
 
-If two candidate positions are too close, they cannot both be selected. A small
-value term, approximated from pallet quantity, breaks ties in favor of more
-representative positions.
+也就是说，如果两个候选点太近，就不能同时选中。模型还加入一个很小的价值项，用托盘货量近似位置价值，使模型在满足间距和数量要求的前提下优先选择更有代表性的点位。
 
-### Textbook Algorithm
+### 教材算法
 
-Task 3 uses two textbook algorithms plus an engineering repair step:
+任务 3 使用两个教材算法和一个工程化离散修复步骤：
 
-- **Chapter 7 quadratic penalty method** converts equality and inequality
-  constraints into a penalized objective:
+- **教材第 7 章：二次罚函数法**。把数量约束和间距约束写成罚项：
 
 ```text
 min f(x) + rho/2 * (||h(x)||^2 + ||max(g(x), 0)||^2)
 ```
 
-- **Chapter 6 projected Barzilai-Borwein gradient method** solves each
-  penalized subproblem under the box constraint `0 <= x <= 1`. The method takes
-  a gradient step, projects back into the feasible box, and uses BB step sizes
-  for faster iteration.
-- A **discrete repair step** in `solve_warehouse_layout.py` converts the
-  relaxed continuous solution into a feasible 0-1 set that satisfies the count
-  and spacing constraints.
+- **教材第 6 章：投影 Barzilai-Borwein 梯度法**。每个罚函数子问题都有盒约束 `0 <= x <= 1`，投影 BB 梯度法先沿梯度下降，再投影回可行盒，并用 BB 步长提高迭代效率。
+- **离散修复步骤**。连续松弛解仍然不是最终 0-1 方案，所以 `solve_warehouse_layout.py` 会根据松弛值、位置价值和冲突关系，把解修复为满足数量和间距约束的离散选择结果。
 
-### Output
+### 输出结果
 
-`results/warehouse_layout.csv`:
+`results/warehouse_layout.csv`：
 
 ```text
 pallet_index,x,y
 ```
 
-Each row is one selected cache/transfer location. The default result selects 10
-positions, with a minimum pairwise Manhattan distance of 7, satisfying the
-`dist > 6` spacing requirement.
+每一行表示一个被选中的重点缓存/中转位置。默认结果选中 10 个点，最小两两曼哈顿距离为 7，满足 `dist > 6` 的间距要求。
 
-## 7. Experiment Setup
+## 7. 实验设置
 
-Dependencies:
+环境依赖：
 
 ```text
 numpy
@@ -337,13 +270,13 @@ pandas
 networkx
 ```
 
-Main entry point:
+实验入口：
 
 ```bash
 python run_all.py
 ```
 
-Individual task entry points:
+三个任务也可以单独运行：
 
 ```bash
 python solve_agv_assignment.py
@@ -351,23 +284,23 @@ python solve_dynamic_partition.py
 python solve_warehouse_layout.py
 ```
 
-README figures can be regenerated with:
+配图可以重新生成：
 
 ```bash
 python scripts/make_readme_figures.py
 ```
 
-## 8. Textbook Chapter and Algorithm Mapping
+## 8. 教材章节与算法对应关系
 
-| Task | Problem type | Textbook chapter | Algorithm | Code |
+| 任务 | 问题类型 | 教材章节 | 使用算法 | 代码 |
 | --- | --- | --- | --- | --- |
-| Task 1 AGV assignment | LP relaxation plus integer recovery | Chapter 7 | primal-dual interior-point method | `algorithms/primal_dual_lp.py` |
-| Task 2 dynamic partitioning | linear programming | Chapter 7 | primal-dual interior-point method | `algorithms/primal_dual_lp.py` |
-| Task 3 cache/transfer location selection | spatially constrained 0-1 selection via continuous relaxation | Chapter 7 + Chapter 6 | quadratic penalty + projected BB gradient + repair | `algorithms/quadratic_penalty.py`, `algorithms/projected_bb_gradient.py` |
+| 任务 1：AGV 任务分配 | 线性规划松弛 + 整数恢复 | 第 7 章 | 原始-对偶内点法 | `algorithms/primal_dual_lp.py` |
+| 任务 2：动态分区 | 标准线性规划 | 第 7 章 | 原始-对偶内点法 | `algorithms/primal_dual_lp.py` |
+| 任务 3：重点缓存货位选择 | 带空间冲突的 0-1 选择，经连续松弛求解 | 第 7 章 + 第 6 章 | 二次罚函数法 + 投影 BB 梯度法 + 离散修复 | `algorithms/quadratic_penalty.py`, `algorithms/projected_bb_gradient.py` |
 
-## 9. Results and Analysis
+## 9. 实验结果与分析
 
-A typical `python run_all.py` run prints:
+运行 `python run_all.py` 的典型输出为：
 
 ```text
 [dynamic] status=optimal iter=21 obj=79350.200
@@ -375,20 +308,15 @@ A typical `python run_all.py` run prints:
 [layout] status=optimal outer=2 selected=10 min_dist=7
 ```
 
-Interpretation:
+结果可以这样理解：
 
-- **Task 1** outputs 12 executable transport assignments with total integer
-  route cost 131.
-- **Task 2** outputs 403 nonzero quantity flows with total distance-weighted
-  cost 79350.2, while keeping each workstation above the minimum workload.
-- **Task 3** outputs 10 selected cache/transfer positions with minimum pairwise
-  distance 7, satisfying the spacing requirement.
+- **任务 1** 输出 12 条可执行搬运安排，总整数路线成本为 131，说明当前批次的 AGV-托盘-工位匹配可以用较短路径完成。
+- **任务 2** 输出 403 条非零货量流，总距离加权成本为 79350.2；结果既考虑托盘到工位的距离，也保证工位获得最低工作量。
+- **任务 3** 输出 10 个重点缓存/中转位置，最小两两距离为 7，满足间距要求，说明选出的点不会过度聚集。
 
-Together, the three experiments show how one warehouse dataset can be turned
-into different optimization models across dispatching, service-area
-organization, and layout planning.
+三个实验共同说明：同一份仓库数据可以被转化成不同层面的优化模型，并且这些模型能够由自动化脚本和教材算法直接求解。
 
-## 10. Reproduce
+## 10. 复现方式
 
 ```bash
 python -m venv .venv
@@ -397,7 +325,4 @@ pip install -r requirements.txt
 python run_all.py
 ```
 
-Presentation deliverables, exploratory notebooks, local reference PDFs,
-virtual environments, and intermediate generated artifacts are intentionally
-excluded from the GitHub repository. The repository keeps the code, CSV data,
-figures, and generated results needed for the course project.
+当前 GitHub 仓库不包含演示稿 `deliverables/`、探索性 notebook、本地教材 PDF、虚拟环境和中间生成产物，只保留课程项目运行所需的代码、数据、配图和结果。
