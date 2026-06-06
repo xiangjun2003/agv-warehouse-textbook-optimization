@@ -432,7 +432,7 @@ solve_agv_assignment.py    构造并求解任务分配模型
 solve_dynamic_partition.py 构造并求解动态分区模型
 solve_warehouse_layout.py  构造并求解重点货位选择模型
 algorithms/                教材算法的 Python 实现
-run_all_textbook.py        一键运行三个实验并输出结果</pre>
+run_all_no_copt.py         一键运行三个实验并输出结果</pre>
         <div class="side-stack">
           {note("环境", "Python 虚拟环境中安装 numpy、scipy、pandas、matplotlib 等常用科学计算库。", C["blue"])}
           {note("复现方式", "运行统一入口脚本，即可依次生成三个任务的模型、求解结果和 CSV 输出。", C["green"])}
