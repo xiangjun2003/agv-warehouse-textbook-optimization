@@ -130,6 +130,7 @@ warehouse_data.py              数据读取与距离矩阵构造
 solve_agv_assignment.py        任务 1：AGV 任务分配
 solve_dynamic_partition.py     任务 2：动态分区
 solve_warehouse_layout.py      任务 3：重点缓存货位选择
+solve_multi_period.py          6 时刻滚动优化综合实验
 run_all.py                     一键运行三个实验
 results/                       输出 CSV 结果
 scripts/make_readme_figures.py README 配图生成脚本
@@ -320,7 +321,71 @@ pallet_index,x,y
 
 每一行表示一个被选中的重点缓存/中转位置。默认结果选中 10 个点，最小两两曼哈顿距离为 7，满足 `dist > 6` 的间距要求。
 
-## 7. 实验设置
+## 7. 多时刻滚动优化扩展
+
+![6 个滚动时刻的 AGV 仓储调度过程](figures/multi_period_rolling_process.png)
+
+前三个任务都是单时刻模型：它们回答的是“在当前仓库状态下如何分配、如何分区、如何选址”。为了展示三个任务如何共同服务一个完整仓库决策，项目额外实现了一个 6 时刻滚动优化实验，代码位于 `solve_multi_period.py`。
+
+这个综合任务可以定义为：
+
+```text
+订单波次驱动的 AGV 仓储滚动调度与缓存中转协同优化
+```
+
+它的业务场景是：仓库不断收到订单需求，系统需要分批释放托盘任务；AGV 从当前位置出发取托盘，先把货物送到重点缓存/中转点，再由中转点送到工位处理。项目要同时决定：
+
+- **布局层**：哪些候选货位被选为重点缓存/中转点，对应任务 3；
+- **分区层**：当前波次每个托盘任务主要由哪个工位处理，并且通过哪个中转点到达该工位，对应任务 2；
+- **执行层**：当前时刻哪辆 AGV 去服务哪个托盘，形成具体路线 `AGV -> 托盘 -> 中转点 -> 工位`，对应任务 1。
+
+因此，多时刻实验不是把任务 1/2/3 简单拼在一张图上，而是让三个模型形成一条决策链：
+
+```text
+任务 3：先选出固定缓存/中转点
+  -> 任务 2：每个波次按“托盘 -> 中转点 -> 工位”的成本做动态分区
+  -> 任务 1：按当前 AGV 位置执行“AGV -> 托盘 -> 中转点 -> 工位”的派车
+  -> 更新 AGV 位置和未完成任务，进入下一时刻
+```
+
+这个扩展不是随机生成新仓库，而是用已有真实 CSV 构造可复现的 6 个订单波次：
+
+1. 按 `Order ID` 将 `orders.csv` 中的 675 条订单切分为 6 个连续波次；
+2. 根据 `pallets.csv` 中每个托盘的 `{SKU:数量}`，把每个波次释放的订单需求匹配到真实托盘；
+3. 在第 0 时刻先求解任务 3，选出 10 个固定缓存/中转点；
+4. 每个时刻求解动态分区，成本使用 `托盘 -> 中转点 -> 工位` 的最短中转路径，得到当前待处理托盘的主服务工位和中转点；
+5. 再根据当前 AGV 位置求解 AGV-托盘分配，形成 `AGV -> 托盘 -> 中转点 -> 工位` 路线；
+6. 任务完成后，把参与任务的 AGV 位置更新到送达工位，未处理完的托盘需求进入下一时刻积压。
+
+图中的 6 个子图使用同一坐标尺度和同一实体语义：
+
+- 蓝色三角形：该时刻 AGV 起点。第 1 个时刻来自 `bots.csv`，后续时刻由上一时刻送达工位更新得到；
+- 浅绿色圆点：该时刻已经释放、仍待处理的托盘任务；
+- 深绿色圆点：该时刻实际派车处理的托盘；
+- 红棕色方块：工位；
+- 橙色菱形：任务 3 选出的缓存/中转点，也是当前路线中的中转节点；
+- 蓝色虚线：`AGV -> 托盘` 取货段；
+- 橙色实线：`托盘 -> 中转点` 入缓存/中转段；
+- 粉色点划线：`中转点 -> 工位` 送达段。
+
+默认 6 时刻实验的规模为：每个时刻 12 辆 AGV 参与派车，共输出 72 条路线。由于 6 个时刻只能处理 72 个托盘任务，而当前数据中有 140 个托盘和 675 条订单，因此图中会出现积压量；这正好体现了滚动调度的现实含义：如果订单释放速度超过当前车辆处理能力，就需要继续增加时刻数、增加 AGV 数量，或调整波次释放策略。
+
+输出文件：
+
+```text
+results/multi_period_summary.csv   每个时刻的订单数、派车数、积压量、求解状态
+results/multi_period_routes.csv    每个时刻每辆 AGV 的起点、托盘、中转点、工位和路线成本
+results/multi_period_workload.csv  每个时刻待处理托盘的工作量、主服务工位和主中转点
+figures/multi_period_rolling_process.png 6 个时刻的动态过程图
+```
+
+运行方式：
+
+```bash
+python solve_multi_period.py
+```
+
+## 8. 实验设置
 
 环境依赖：
 
@@ -344,6 +409,7 @@ python run_all.py
 python solve_agv_assignment.py
 python solve_dynamic_partition.py
 python solve_warehouse_layout.py
+python solve_multi_period.py
 ```
 
 配图可以重新生成：
@@ -352,15 +418,18 @@ python solve_warehouse_layout.py
 python scripts/make_readme_figures.py
 ```
 
-## 8. 教材章节与算法对应关系
+其中 `scripts/make_readme_figures.py` 重新生成前三个单时刻任务的 README 配图；`solve_multi_period.py` 会同时生成 6 时刻滚动图。
+
+## 9. 教材章节与算法对应关系
 
 | 任务 | 问题类型 | 教材章节 | 使用算法 | 代码 |
 | --- | --- | --- | --- | --- |
 | 任务 1：AGV 任务分配 | 线性规划松弛 + 整数恢复 | 第 7 章 | 原始-对偶内点法 | `algorithms/primal_dual_lp.py` |
 | 任务 2：动态分区 | 标准线性规划 | 第 7 章 | 原始-对偶内点法 | `algorithms/primal_dual_lp.py` |
 | 任务 3：重点缓存货位选择 | 带空间冲突的 0-1 选择，经连续松弛求解 | 第 7 章 + 第 6 章 | 二次罚函数法 + 投影 BB 梯度法 + 离散修复 | `algorithms/quadratic_penalty.py`, `algorithms/projected_bb_gradient.py` |
+| 多时刻滚动优化 | 6 个连续波次的分解式滚动优化 | 第 7 章 + 第 6 章 | 缓存/中转选址 + 经中转点的动态分区 LP + 经中转点的 AGV 分配 LP | `solve_multi_period.py` |
 
-## 9. 实验结果与分析
+## 10. 实验结果与分析
 
 运行 `python run_all.py` 的典型输出为：
 
@@ -376,15 +445,29 @@ python scripts/make_readme_figures.py
 - **任务 2** 输出 403 条非零货量流，总距离加权成本为 79350.2；结果既考虑托盘到工位的距离，也保证工位获得最低工作量。
 - **任务 3** 输出 10 个重点缓存/中转位置，最小两两距离为 7，满足间距要求，说明选出的点不会过度聚集。
 
+运行 `python solve_multi_period.py` 的典型输出为：
+
+```text
+[t=1] orders=113 active=93 dispatched=12 backlog=81 cost=152.000
+[t=2] orders=113 active=122 dispatched=12 backlog=110 cost=165.000
+[t=3] orders=113 active=125 dispatched=12 backlog=113 cost=168.000
+[t=4] orders=112 active=127 dispatched=12 backlog=115 cost=174.000
+[t=5] orders=112 active=128 dispatched=12 backlog=116 cost=168.000
+[t=6] orders=112 active=125 dispatched=12 backlog=113 cost=174.000
+```
+
+这个结果可以看出：每个时刻都有 12 辆 AGV 被派出，每条路线都经过任务 3 选出的缓存/中转点。由于订单波次释放的需求远高于 12 个托盘任务，因此积压量逐步增加。它说明当前 6 时刻实验更适合展示“滚动调度过程、缓存中转布局和车辆能力限制”，如果要完成所有订单，需要继续增加时刻数或提高每个时刻的处理能力。
+
 三个实验共同说明：同一份仓库数据可以被转化成不同层面的优化模型，并且这些模型能够由自动化脚本和教材算法直接求解。
 
-## 10. 复现方式
+## 11. 复现方式
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 python run_all.py
+python solve_multi_period.py
 ```
 
 当前 GitHub 仓库不包含演示稿 `deliverables/`、探索性 notebook、本地教材 PDF、虚拟环境和中间生成产物，只保留课程项目运行所需的代码、数据、配图和结果。
