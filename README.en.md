@@ -85,7 +85,7 @@ The project uses the following warehouse entities:
 Distance is defined as:
 
 $$
-\operatorname{dist}(a,b)=|x_a-x_b|+|y_a-y_b|
+\mathrm{dist}(a,b)=|x_a-x_b|+|y_a-y_b|
 $$
 
 ### Entity Legend and Visual Annotation Rules
@@ -268,8 +268,8 @@ pallet -> workstation
 
 Decision variables:
 
-- $x_{ij}\in\{0,1\}$: whether AGV $i$ serves pallet $j$;
-- $y_{jk}\in\{0,1\}$: whether pallet $j$ is delivered to workstation $k$.
+- `x_ij in {0,1}`: whether AGV `i` serves pallet `j`;
+- `y_jk in {0,1}`: whether pallet `j` is delivered to workstation `k`.
 
 Objective:
 
@@ -338,12 +338,12 @@ minimum workload level.
 
 Decision variable:
 
-$z_{jk}\ge 0$: quantity from pallet $j$ assigned to workstation $k$.
+`z_jk >= 0`: quantity from pallet `j` assigned to workstation `k`.
 
 Parameters:
 
-- $q_j$: total quantity of pallet $j$;
-- $d_{jk}$: Manhattan distance from pallet $j$ to workstation $k$.
+- `q_j`: total quantity of pallet `j`;
+- `d_jk`: Manhattan distance from pallet `j` to workstation `k`.
 
 Objective:
 
@@ -353,10 +353,23 @@ $$
 
 Main constraints:
 
-- each pallet's quantity is fully assigned: $\sum_k z_{jk}=q_j$;
+- each pallet's quantity is fully assigned:
+
+$$
+\sum_k z_{jk}=q_j
+$$
+
 - each workstation receives at least a minimum workload:
-  $\sum_j z_{jk}\ge \alpha\frac{\sum_j q_j}{K}$;
-- all quantity flows are nonnegative: $z_{jk}\ge 0$.
+
+$$
+\sum_j z_{jk}\ge \alpha\frac{\sum_j q_j}{K}
+$$
+
+- all quantity flows are nonnegative:
+
+$$
+z_{jk}\ge 0
+$$
 
 ### Textbook Algorithm
 
@@ -401,7 +414,7 @@ congestion.
 
 Decision variable:
 
-$x_i\in\{0,1\}$: whether candidate location $i$ is selected.
+`x_i in {0,1}`: whether candidate location `i` is selected.
 
 Cardinality constraint:
 
@@ -412,7 +425,7 @@ $$
 Spacing constraint:
 
 $$
-x_i+x_j\le 1,\quad \text{if }\operatorname{dist}(i,j)\le 6
+x_i+x_j\le 1,\quad \mathrm{if} \mathrm{dist}(i,j)\le 6
 $$
 
 If two candidate positions are too close, they cannot both be selected. A small
@@ -690,31 +703,31 @@ scheduling.
 
 Sets and parameters:
 
-- $P$: pallets, $|P|=140$;
-- $S$: workstations, $|S|=18$;
-- $C_0$: candidate cache positions, up to 140 pallet/storage coordinates;
-- $m=10$: number of selected cache points;
-- $A$: AGVs, $|A|=24$;
-- $T$: planning rounds, for example $T=20$ covers all current ablation settings;
-- $q_p$: demand quantity on pallet $p$;
-- $Q=120$: AGV capacity per route;
-- $H=80$: workstation processing capacity per round;
-- $B=600$: cache capacity;
-- $d(i,j)$: Manhattan distance between nodes $i$ and $j$.
+- `P`: pallets, `|P| = 140`;
+- `S`: workstations, `|S| = 18`;
+- `C0`: candidate cache positions, up to 140 pallet/storage coordinates;
+- `m = 10`: number of selected cache points;
+- `A`: AGVs, `|A| = 24`;
+- `T`: planning rounds, for example `T = 20` covers all current ablation settings;
+- `q_p`: demand quantity on pallet `p`;
+- `Q = 120`: AGV capacity per route;
+- `H = 80`: workstation processing capacity per round;
+- `B = 600`: cache capacity;
+- `d(i,j)`: Manhattan distance between nodes `i` and `j`.
 
 Main decision variables:
 
-- $u_{ps}\in\{0,1\}$: pallet $p$ is served by workstation $s$;
-- $v_c\in\{0,1\}$: candidate cache point $c\in C_0$ is selected;
-- $x^D_{apst}\in\{0,1\}$: AGV $a$ transports pallet $p$ directly to workstation $s$ at round $t$;
-- $x^I_{apct}\in\{0,1\}$: AGV $a$ transports pallet $p$ to cache $c$ at round $t$;
-- $x^O_{acst}\in\{0,1\}$: AGV $a$ transports from cache $c$ to workstation $s$ at round $t$;
-- $g^D_{apst},g^I_{apct},g^O_{acst}\ge 0$: transported quantities;
-- $R_{pt}\ge 0$: remaining quantity on pallet $p$ after round $t$;
-- $I_{ct}\ge 0$: inventory at cache $c$ after round $t$;
-- $L_{st}\ge 0$: workstation queue after round $t$;
-- $h_{st}\ge 0$: quantity processed by workstation $s$ at round $t$;
-- $F_t\in\{0,1\}$: all demand has finished by the end of round $t$.
+- `u_ps in {0,1}`: pallet `p` is served by workstation `s`;
+- `v_c in {0,1}`: candidate cache point `c` is selected;
+- `x^D_apst in {0,1}`: AGV `a` transports pallet `p` directly to workstation `s` at round `t`;
+- `x^I_apct in {0,1}`: AGV `a` transports pallet `p` to cache `c` at round `t`;
+- `x^O_acst in {0,1}`: AGV `a` transports from cache `c` to workstation `s` at round `t`;
+- `g^D_apst, g^I_apct, g^O_acst >= 0`: transported quantities;
+- `R_pt >= 0`: remaining quantity on pallet `p` after round `t`;
+- `I_ct >= 0`: inventory at cache `c` after round `t`;
+- `L_st >= 0`: workstation queue after round `t`;
+- `h_st >= 0`: quantity processed by workstation `s` at round `t`;
+- `F_t in {0,1}`: all demand has finished by the end of round `t`.
 
 A lexicographic objective can first minimize completion time, then minimize AGV
 distance:
@@ -754,7 +767,7 @@ $$
 
 $$
 v_c+v_{c'}\le 1,
-\quad \text{if }\operatorname{dist}(c,c')\le 6
+\quad \mathrm{if} \mathrm{dist}(c,c')\le 6
 $$
 
 Each AGV executes at most one route per round:
@@ -851,10 +864,10 @@ binary transition variables.
 If partitioning and direct/cache route choices are solved jointly while the 10
 cache points selected by Task 3 are fixed, the action set already includes:
 
-- pallet to workstation: $140\times18=2{,}520$;
-- pallet to cache: $140\times10=1{,}400$;
-- cache to workstation: $10\times18=180$;
-- total: about $4{,}100$ route actions.
+- pallet to workstation: `140 x 18 = 2520`;
+- pallet to cache: `140 x 10 = 1400`;
+- cache to workstation: `10 x 18 = 180`;
+- total: about `4100` route actions.
 
 The `AGV-action-round` binaries alone are then:
 
@@ -868,9 +881,9 @@ binary variables.
 If cache location selection is also placed in the same model, the cache set is
 not 10 selected points but up to 140 candidate storage locations. Then:
 
-- pallet to candidate cache: $140\times140=19{,}600$;
-- cache to workstation: $140\times18=2{,}520$;
-- route actions alone exceed $24{,}000$;
+- pallet to candidate cache: `140 x 140 = 19600`;
+- cache to workstation: `140 x 18 = 2520`;
+- route actions alone exceed `24000`;
 - `AGV-action-round` binaries:
 
 $$
