@@ -1,4 +1,4 @@
-scenario,rounds,routes,agv_routes,station_pull_routes,total_agv_distance,station_pull_distance,processed_quantity,moved_to_cache_quantity,final_remaining_quantity,final_cache_quantity,agv_distance_saved_vs_task1_only,agv_distance_saved_pct_vs_task1_only,round_delta_vs_task1_only,agv_distance_saved_vs_partition,agv_distance_saved_pct_vs_partition,round_delta_vs_partition
-task1_only,10,221,149,72,2899.0,0.0,8478.0,0.0,0.0,0.0,0.0,0.0,0,,,
-task1_partition,8,236,149,87,3322.0,0.0,8478.0,0.0,0.0,0.0,-423.0,-0.145912383580545,-2,,,
-task1_partition_cache,8,228,149,79,2445.0,277.0,8478.0,4285.0,0.0,0.0,454.0,0.15660572611245258,-2,877.0,0.26399759181216137,0
+scenario,rounds,routes,agv_routes,cache_outbound_routes,station_process_routes,total_agv_distance,processed_quantity,moved_to_cache_quantity,final_remaining_quantity,final_cache_quantity,agv_distance_saved_vs_task1_only,agv_distance_saved_pct_vs_task1_only,round_delta_vs_task1_only,agv_distance_saved_vs_partition,agv_distance_saved_pct_vs_partition,round_delta_vs_partition
+task1_only,10,221,149,0,72,2899.0,8478.0,0.0,0.0,0.0,0.0,0.0,0,,,
+task1_partition,8,236,149,0,87,3322.0,8478.0,0.0,0.0,0.0,-423.0,-0.145912383580545,-2,,,
+task1_partition_cache,9,266,177,28,89,3060.0,8478.0,2806.0,0.0,0.0,-161.0,-0.05553639185926181,-1,262.0,0.07886815171583383,1

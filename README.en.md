@@ -460,16 +460,26 @@ The ablation compares three increasingly rich settings:
 | --- | --- | --- | --- |
 | Task 1 only | AGV dispatching | choose AGV-pallet-workstation tasks by rolling distance | workstation |
 | Task 1 + dynamic partitioning | dispatching + workstation service areas | Task 2 first assigns each pallet to a primary workstation | assigned workstation |
-| Task 1 + dynamic partitioning + cache | dispatching + service areas + cache state | AGVs may replenish front-of-workstation cache points; the assigned workstation still processes the goods | cache point or workstation |
+| Task 1 + dynamic partitioning + cache | dispatching + service areas + cache state | AGVs may deliver directly, move goods into cache, or replenish workstations from cache | workstation; cache is only intermediate inventory |
 
 Here, cache points are not modeled as "goods no longer need workstations" or
-as mandatory extra AGV hops. They represent front-of-workstation staging or
-transfer buffers: AGVs perform the long-haul movement to a cache point, while
-the assigned workstation consumes inventory from that cache through local
-handling. Therefore all goods are still processed by workstations. The main
-metrics are **rounds to finish all demand** and **total AGV travel distance**.
-Cache-to-workstation local movement is recorded separately as an auxiliary
-metric.
+as "delivery to cache means completion." They represent front-of-workstation
+intermediate buffers. AGVs may first move small quantities from pallets into
+cache, and AGVs may later move consolidated quantities from cache to the
+assigned workstation. Goods are counted as completed only after they enter a
+workstation queue and are processed under the workstation processing capacity.
+
+The cache setting has three AGV route types:
+
+- `pallet -> workstation`: direct delivery into the workstation queue;
+- `pallet -> cache`: inbound cache replenishment, not yet completed;
+- `cache -> workstation`: outbound cache delivery, performed by AGVs and
+  included in AGV total travel distance.
+
+Each round chooses between direct delivery and cache staging using the current
+AGV positions, remaining quantities, cache inventory, and cache capacity. Cache
+is preferred only when `pallet -> cache` plus the amortized downstream
+`cache -> workstation` cost is cheaper than direct delivery.
 
 The rolling pipeline is:
 
@@ -490,7 +500,7 @@ Default data and parameters:
 - 18 workstations each process at most 160 units per round;
 - Task 3 selects 10 cache points, each with default capacity 600.
 
-The rolling process figure shows the full 8-round process for the third
+The rolling process figure shows the full 9-round process for the third
 setting:
 
 - blue triangles: AGV starting positions in the current round;
@@ -500,7 +510,7 @@ setting:
 - orange diamonds: selected cache points;
 - blue dashed lines: `AGV -> pallet` pickup legs;
 - orange solid lines: AGV `pallet -> cache` delivery legs;
-- pink dash-dot lines: local `cache -> workstation` processing legs.
+- pink dash-dot lines: AGV `cache -> workstation` outbound replenishment legs.
 
 Outputs:
 
@@ -589,11 +599,11 @@ A typical `python solve_multi_period.py` run prints:
 
 ```text
 Rolling ablation optimization
-scenarios=3 route_records=685 time=1.203s
+scenarios=3 route_records=723 time=1.330s
 [task1_only] rounds=10 agv_routes=149 agv_distance=2899.000 processed=8478.000 cached=0.000
 [task1_partition] rounds=8 agv_routes=149 agv_distance=3322.000 processed=8478.000 cached=0.000
-[task1_partition_cache] rounds=8 agv_routes=149 agv_distance=2445.000 processed=8478.000 cached=4285.000
-cache agv-distance saving vs partition=877.000 (26.40%)
+[task1_partition_cache] rounds=9 agv_routes=177 agv_distance=3060.000 processed=8478.000 cached=2806.000
+cache agv-distance saving vs partition=262.000 (7.89%)
 ```
 
 The rolling result shows that all demand is fixed at the initial time. With the
@@ -601,16 +611,16 @@ default parameters, Task 1 alone sends goods to nearby workstations and keeps
 AGV distance at 2899, but its workload is concentrated and some workstations
 queue, so completion takes 10 rounds. Adding dynamic partitioning imposes an
 upper workload balance on workstations: AGV distance increases to 3322, but
-completion decreases to 8 rounds. Adding cache points keeps completion at 8
-rounds and reduces AGV distance to 2445, saving 877 versus the partition
-setting (26.40%).
+completion decreases to 8 rounds. Adding cache points creates 28 additional
+`cache -> workstation` AGV outbound routes, so the total number of AGV routes
+increases to 177 and completion takes 9 rounds. However, cache replaces some
+long direct deliveries with shorter staged movement: AGV distance drops to
+3060, saving 262 versus the partition setting (7.89%).
 
-This also explains why an earlier "force every item through cache and let AGVs
-move it again from cache to workstation" setup was worse: it split one item
-into two AGV trips. The current model treats cache points as front-of-line
-staging buffers, records local cache-to-workstation handling separately, and
-therefore captures the trade-off more realistically: less AGV travel while the
-goods still finish at workstations.
+This result shows that cache points do not automatically reduce both distance
+and time. Their value is to replace some long small-batch direct deliveries
+with short inbound cache replenishment and batched outbound replenishment. The
+tradeoff is that outbound cache delivery also consumes AGV capacity and rounds.
 
 Together, the three experiments show how one warehouse dataset can be turned
 into different optimization models across dispatching, service-area
