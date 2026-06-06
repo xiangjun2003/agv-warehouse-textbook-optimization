@@ -303,6 +303,7 @@ def draw_background_overview() -> None:
 def draw_task1_assignment() -> None:
     data = load_data(agv_sample_prob=0.6, seed=0, max_agvs=12)
     assignments = pd.read_csv(RESULTS_DIR / "agv_assignment.csv")
+    zero_pickups = 0
 
     fig = plt.figure(figsize=(15.5, 8.8), dpi=160)
     gs = fig.add_gridspec(1, 2, width_ratios=[1.25, 0.35], wspace=0.08)
@@ -325,11 +326,13 @@ def draw_task1_assignment() -> None:
         zorder=3,
     )
 
-    shown = assignments.head(10)
+    shown = assignments
     for row in shown.itertuples(index=False):
         agv = agvs[int(row.agv_index)]
         pallet = pallets[int(row.pallet_index)]
         workstation = workstations[int(row.workstation_index)]
+        if np.array_equal(agv, pallet):
+            zero_pickups += 1
         pickup_start, pickup_end = shortened_segment(
             agv,
             pallet,
@@ -406,8 +409,9 @@ def draw_task1_assignment() -> None:
         0.04,
         0.50,
         "辅助标注\n"
-        f"展示路线：前 {len(shown)} 条\n"
-        f"完整分配：{len(assignments)} 条\n"
+        f"展示路线：全部 {len(shown)} 条\n"
+        "AGV 位置：调度开始前快照\n"
+        f"取货距离为 0：{zero_pickups} 条\n"
         "蓝色虚线：AGV 到托盘\n"
         "橙色实线：托盘到工位",
         transform=ax_info.transAxes,

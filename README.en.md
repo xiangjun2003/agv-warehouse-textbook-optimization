@@ -54,8 +54,11 @@ computable, reproducible, and explainable optimization models:
 
 The project uses the following warehouse entities:
 
-- **AGV**: an automated guided vehicle. In Task 1, an AGV moves from its
-  current position to a pallet, picks it, and delivers it to a workstation.
+- **AGV**: an automated guided vehicle. In the figures, AGV coordinates are
+  the initial vehicle positions before the dispatching batch starts, i.e. the
+  `t0` state snapshot. They are not historical trajectory points or final
+  positions after task completion. In Task 1, an AGV moves from this initial
+  position to a pallet, picks it, and delivers it to a workstation.
 - **Pallet**: a standardized load unit. `pallets.csv` gives each pallet's
   coordinate, pallet ID, and SKU quantities. The model aggregates SKU
   quantities into a total pallet quantity.
@@ -123,7 +126,9 @@ The data relationships are:
   workstations are located.
 - `pallets.csv` describes inventory state: where goods are stored and how much
   quantity each pallet contains.
-- `bots.csv` describes fleet state: which AGVs can depart from which positions.
+- `bots.csv` describes fleet state: before dispatching starts, which AGVs can
+  depart from which positions. Therefore, the blue triangles in Figures 1 and
+  2 have the same meaning: initial AGV positions for the current batch.
 - `orders.csv` describes demand context. Its total demand is 8478, matching the
   total pallet quantity of 8478, so it explains the business scale of the
   current inventory/demand batch.
@@ -219,6 +224,15 @@ A result row can be read as:
 ```text
 AGV i moves from its current position, picks pallet j, and delivers it to workstation k.
 ```
+
+Here, "current position" means the AGV initial position at dispatching time
+`t0`. The blue triangles are not vehicle trajectories; they are starting
+positions read from `bots.csv`. Each blue dashed line is the pickup segment
+from AGV to pallet, and each orange solid line is the delivery segment from
+pallet to workstation. If an AGV's initial position is exactly the same as its
+assigned pallet coordinate, the pickup distance is zero, so no visible blue
+dashed line appears. This means the AGV is already at the pallet location, not
+that it was left unassigned.
 
 Poor assignment causes empty travel, detours, and workstation waiting. A good
 assignment reduces pickup and delivery distance for the current dispatching
