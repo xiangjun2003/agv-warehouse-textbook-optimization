@@ -1,0 +1,16 @@
+{
+  "pptx": "/Users/xiangjun/python文件/Optimization Project/agv-textbook-beautified-preview/final/slide-01_edited.pptx",
+  "deck_manifest": "/Users/xiangjun/python文件/Optimization Project/agv-textbook-beautified-preview/deck_manifest.json",
+  "expected_pages": 28,
+  "slides": 28,
+  "page_manifests_missing": [],
+  "page_validation_missing": [],
+  "failed_page_validations": [],
+  "page_contract_violations": [],
+  "notes_expected": 0,
+  "notes_found": 0,
+  "notes_hash_mismatches": [],
+  "missing_parts": [],
+  "warnings": [],
+  "passed": true
+}

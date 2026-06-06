@@ -1,0 +1,26 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+
+.venv/
+.env
+
+# Original COPT notebooks are kept locally but are not part of this no-COPT repo.
+*.ipynb
+
+# Large or transient generated artifacts.
+outputs/
+agv-textbook-beautified-preview/
+
+# Keep only the final no-COPT presentation artifacts in Git.
+deliverables/*
+!deliverables/agv-warehouse-textbook-optimization-image-to-editable-edited.pptx
+!deliverables/agv-warehouse-textbook-optimization-image-to-editable-validation.json
+!deliverables/agv-warehouse-textbook-optimization-animated.html
+!deliverables/agv-warehouse-textbook-optimization-native.html
+
+# Local helper for the image-to-editable subagent run.
+scripts/write_image_to_editable_page_prompts.py
+
+# Local reference PDFs; the repository only needs code, CSV data, and generated results.
+*.pdf
