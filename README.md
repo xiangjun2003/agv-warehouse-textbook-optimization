@@ -1,118 +1,207 @@
 # AGV Warehouse Optimization Course Project
 
-This repository contains an AGV warehouse optimization course project built
-with local CSV data, automated model construction, and self-implemented
-textbook optimization algorithms. It follows the same narrative order as the
-presentation deck: warehouse background, task meaning, modeling, textbook
-algorithms, experiment setup, and result analysis.
+This repository contains a complete AGV warehouse optimization course project.
+It uses local CSV data, automated model-building scripts, and
+self-implemented textbook optimization algorithms to solve three warehouse
+decision tasks: AGV assignment, dynamic partitioning, and cache/transfer
+location selection.
 
-## 1. Background
+The README follows the same narrative order as the presentation: background,
+entities and data, task meaning, modeling, textbook algorithm mapping,
+experiment setup, and result analysis.
 
-Modern warehouses use AGVs, or automated guided vehicles, to move pallets
-between storage positions and workstations. Even when AGVs can move
-automatically, the system still needs optimization:
+## 1. Background, Entities, and Data
 
-- AGVs are limited resources.
-- Pallets are scattered across warehouse coordinates.
-- Workstations need stable supply and balanced workload.
-- Cache or transfer locations should not be overly concentrated.
+In an automated warehouse, AGVs move pallets through a grid of aisles and
+nodes. The system needs more than vehicles that can move: it needs dispatching
+that avoids unnecessary travel, workstation service areas that keep workloads
+stable, and cache or transfer positions that do not become overly concentrated.
 
-The project turns these operational questions into optimization models that
-can be generated and solved automatically from local CSV data.
+![Background and data overview](figures/background_data_overview.png)
 
-## 2. Warehouse Entities
+The project uses the following warehouse entities:
 
-- **AGV**: an automated vehicle that moves from its current position to a
-  pallet and then delivers the pallet to a workstation or area.
-- **Pallet**: a standardized load unit carrying one or more SKUs. In this
-  project, each pallet has a coordinate and a total quantity.
+- **AGV**: an automated guided vehicle. In Task 1, an AGV moves from its
+  current position to a pallet, picks it, and delivers it to a workstation.
+- **Pallet**: a standardized load unit. `pallets.csv` gives each pallet's
+  coordinate, pallet ID, and SKU quantities. The model aggregates SKU
+  quantities into a total pallet quantity.
 - **Workstation**: a processing point such as picking, packing, inspection, or
-  temporary handling.
+  temporary handling. Nodes with type `5` in `map.csv` are read as
+  workstations.
 - **Warehouse area**: in Task 2, an area is not a fixed room. It is the service
   range formed by assigning pallet quantities to workstations.
-- **Candidate storage/cache position**: in Task 3, candidate locations are
+- **Candidate storage/cache position**: in Task 3, candidate positions are
   existing pallet/storage coordinates that may be selected as important cache
-  or transfer points.
+  or transfer locations.
+- **Aisle/key node**: road nodes, storage nodes, charging nodes, connection
+  nodes, and workstations describe the warehouse grid. The current models use
+  Manhattan distance as a grid-travel approximation.
 
-Distances are approximated by Manhattan distance because AGVs usually move on a
-warehouse grid:
+Distance is defined as:
 
 ```text
 dist(a, b) = |x_a - x_b| + |y_a - y_b|
 ```
 
-## 3. Project Content
+The data files are:
+
+| File | Contents | Role in the project |
+| --- | --- | --- |
+| `data/map.csv` | node type, node coordinates, workstation coordinates | builds the warehouse grid, reads workstations, and supports distance calculation |
+| `data/pallets.csv` | pallet coordinates, pallet ID, SKU:quantity lists | provides pallet positions, candidate locations, and pallet quantities |
+| `data/bots.csv` | AGV ID, current position, direction | provides AGV starting positions for Task 1 |
+| `data/orders.csv` | order ID, SKU, demand quantity, received time, deadline | represents the business-demand background; the current models optimize from pallet inventory and coordinates, and the order data can support later order-level dispatching |
+
+In the default experiment, Task 1 uses a fixed random seed to sample 12
+available AGVs for one dispatching batch. The randomness only creates a
+reproducible experimental batch; it does not change the pallet, workstation, or
+map data.
+
+## 2. Project Content
 
 The project contains three optimization tasks:
 
 1. **AGV assignment**: decide which AGV serves which pallet and which
    workstation receives it.
-2. **Dynamic partition**: decide how much quantity from each pallet is assigned
-   to each workstation.
-3. **Warehouse layout selection**: choose important cache or transfer positions
-   from candidate pallet/storage locations.
+2. **Dynamic partitioning**: decide how much quantity from each pallet is
+   assigned to each workstation, forming workstation service areas.
+3. **Cache/transfer location selection**: choose important cache or transfer
+   positions from candidate storage locations.
 
-These tasks cover three levels of warehouse decision-making: daily dispatching,
-workload-area organization, and layout-level cache selection.
+These tasks correspond to three warehouse decision levels: daily dispatching,
+area organization, and layout planning.
+
+## 3. Automated Modeling and Solving Workflow
+
+The workflow is automated. Running `python run_all.py` reads the data, builds
+distance matrices, constructs objective vectors and constraint matrices, calls
+the textbook algorithms, and writes results into `results/`.
+
+```text
+CSV data
+  -> warehouse_data.py reads coordinates, quantities, AGVs, and workstations
+  -> solve_*.py builds objective vectors and constraint matrices
+  -> algorithms/*.py solves the models with textbook algorithms
+  -> results/*.csv stores experiment outputs
+```
+
+Repository structure:
+
+```text
+data/                         local warehouse CSV data
+figures/                      figures used in this README
+algorithms/                   self-implemented textbook algorithms
+warehouse_data.py              data loading and distance matrix construction
+solve_agv_assignment.py        Task 1 model builder and solver
+solve_dynamic_partition.py     Task 2 model builder and solver
+solve_warehouse_layout.py      Task 3 model builder and solver
+run_all.py                     one-click reproduction entry point
+results/                       generated CSV outputs
+scripts/make_readme_figures.py README figure generation script
+```
+
+Default problem sizes:
+
+| Task | Default size |
+| --- | --- |
+| Task 1 | 12 AGVs, 140 pallets, 18 workstations; 4498 LP variables and 450 equality constraints |
+| Task 2 | 140 pallets and 18 workstations; 2538 LP variables and 158 equality constraints |
+| Task 3 | select 10 locations from 140 candidates; 140 continuous relaxation variables and 2165 spatial conflict edges |
 
 ## 4. Task 1: AGV Assignment
 
+![Task 1 AGV assignment](figures/task1_agv_assignment.png)
+
 ### Meaning
 
-Task 1 answers: **who should move which pallet, and where should it be sent?**
+Task 1 answers: **which AGV should move which pallet, and where should it be
+sent?**
 
 A result row can be read as:
 
 ```text
-AGV i picks pallet j and sends it to workstation k.
+AGV i moves from its current position, picks pallet j, and delivers it to workstation k.
 ```
+
+Poor assignment causes empty travel, detours, and workstation waiting. A good
+assignment reduces pickup and delivery distance for the current dispatching
+batch.
 
 ### Model
 
-The model separates one transport job into pickup distance and delivery
-distance.
+One movement is split into two distance components:
+
+```text
+AGV -> pallet
+pallet -> workstation
+```
 
 Decision variables:
 
 ```text
 x(i,j): whether AGV i serves pallet j
-y(j,k): whether pallet j is sent to workstation k
+y(j,k): whether pallet j is delivered to workstation k
 ```
 
 Objective:
 
 ```text
-min sum d(AP) x(i,j) + sum d(PW) y(j,k)
+min sum d(AGV_i, pallet_j) x(i,j)
+  + sum d(pallet_j, workstation_k) y(j,k)
 ```
 
-where `d(AP)` is the AGV-to-pallet distance, and `d(PW)` is the
-pallet-to-workstation distance.
+Main constraints:
 
-The model also enforces constraints such as one task per AGV, consistency
-between pickup and delivery, and workstation capacity.
+- each sampled AGV receives one transport task;
+- each pallet is picked by at most one AGV;
+- pickup and delivery decisions must be consistent;
+- each workstation has a receiving-capacity limit.
 
-### Algorithm
+### Textbook Algorithm
 
-The linear-programming relaxation is solved by the self-implemented
-primal-dual interior-point method in `algorithms/primal_dual_lp.py`. A recovery
-step then converts the relaxed solution into executable integer assignments.
+Task 1 is formulated as a linear-programming relaxation and solved with the
+**Chapter 7 primal-dual interior-point method for linear programming**. The
+implementation is in `algorithms/primal_dual_lp.py`.
+
+The solver handles:
+
+```text
+min c^T x
+s.t. A x = b, x >= 0
+```
+
+It maintains primal variables `x`, dual variables `y`, and slacks `s`, and uses
+Newton directions to reduce primal residual, dual residual, and complementarity
+gap. After solving the relaxation, `solve_agv_assignment.py` recovers an
+executable integer AGV-pallet-workstation assignment.
 
 ### Output
 
-`results/agv_assignment.csv` contains:
+`results/agv_assignment.csv`:
 
 ```text
 agv_index,pallet_index,workstation_index,cost
 ```
 
-## 5. Task 2: Dynamic Partition
+The `cost` is the Manhattan distance from AGV to pallet plus pallet to
+workstation.
+
+## 5. Task 2: Dynamic Partitioning
+
+![Task 2 dynamic partitioning](figures/task2_dynamic_partition.png)
 
 ### Meaning
 
 Task 2 answers: **which workstation should process each pallet's quantity?**
 
-Unlike Task 1, this is not vehicle-task matching. It is a quantity-flow model:
-a pallet's quantity can be distributed to workstation service areas.
+This is different from Task 1. Task 1 matches vehicles to transport jobs; Task
+2 assigns pallet quantities to workstation service ranges.
+
+The practical meaning is that service areas are generated by the model instead
+of being fixed in advance. The model considers pallet location, pallet
+quantity, and workstation location, while also keeping each workstation above a
+minimum workload level.
 
 ### Model
 
@@ -126,7 +215,7 @@ Parameters:
 
 ```text
 q(j): total quantity of pallet j
-d(j,k): distance from pallet j to workstation k
+d(j,k): Manhattan distance from pallet j to workstation k
 ```
 
 Objective:
@@ -137,123 +226,167 @@ min sum d(j,k) z(j,k)
 
 Main constraints:
 
-- each pallet's quantity must be fully assigned;
-- each workstation must receive at least a minimum workload;
-- all quantity flows are nonnegative.
+- each pallet's quantity is fully assigned: `sum_k z(j,k) = q(j)`;
+- each workstation receives at least a minimum workload:
+  `sum_j z(j,k) >= alpha * total_quantity / K`;
+- all quantity flows are nonnegative: `z(j,k) >= 0`.
 
-### Algorithm
+### Textbook Algorithm
 
-This is a standard linear program, so it is solved directly by the
-self-implemented primal-dual interior-point method.
+Task 2 is a standard linear program and is solved directly with the **Chapter 7
+primal-dual interior-point method**. The implementation is also
+`algorithms/primal_dual_lp.py`.
+
+No integer recovery is needed because `z(j,k)` is a continuous quantity flow.
+The solution directly tells how much quantity from each pallet is assigned to
+each workstation.
 
 ### Output
 
-`results/dynamic_partition.csv` contains:
+`results/dynamic_partition.csv`:
 
 ```text
 pallet_index,workstation_index,quantity
 ```
 
-## 6. Task 3: Warehouse Layout Selection
+Summing `quantity` by workstation gives the workstation workload.
+
+## 6. Task 3: Cache/Transfer Location Selection
+
+![Task 3 warehouse layout selection](figures/task3_warehouse_layout.png)
 
 ### Meaning
 
-Task 3 answers: **which existing candidate locations should become important
-cache or transfer positions?**
+Task 3 answers: **which locations should become important cache or transfer
+positions?**
 
-This is a layout-level decision. It is not deciding where a single pallet moves
-today; it selects a set of useful positions for high-frequency storage,
-workstation replenishment, temporary AGV transfer, or pre-shipping staging.
+In Tasks 1 and 2, pallet positions are fixed inputs. In Task 3, candidate
+positions still come from existing warehouse coordinates, but the selected
+important positions are decision variables.
+
+This is a layout-level selection problem. The experiment selects 10 positions
+from 140 candidate storage locations for high-frequency temporary storage,
+workstation replenishment, AGV transfer, or pre-shipping staging. The selected
+locations must not be overly concentrated, otherwise they can create local
+congestion.
 
 ### Model
 
 Decision variable:
 
 ```text
-x(i) in {0, 1}: whether candidate position i is selected
+x(i) in {0, 1}: whether candidate location i is selected
 ```
 
-The experiment selects a fixed number of positions:
+Cardinality constraint:
 
 ```text
-sum x(i) = 10
+sum_i x(i) = 10
 ```
 
-Spacing constraints prevent selected positions from being too close:
+Spacing constraint:
 
 ```text
 x(i) + x(j) <= 1, if dist(i,j) <= 6
 ```
 
-A small score term prefers higher-value positions. In the current experiment,
-the score is approximated from pallet quantity.
+If two candidate positions are too close, they cannot both be selected. A small
+value term, approximated from pallet quantity, breaks ties in favor of more
+representative positions.
 
-### Algorithm
+### Textbook Algorithm
 
-Task 3 is handled by:
+Task 3 uses two textbook algorithms plus an engineering repair step:
 
-- `algorithms/quadratic_penalty.py`: quadratic penalty method for equality and
-  inequality constraints;
-- `algorithms/projected_bb_gradient.py`: projected Barzilai-Borwein gradient
-  method for the box-constrained continuous relaxation;
-- a discrete repair step in `solve_warehouse_layout.py` that converts the
-  relaxed solution into a feasible 0-1 layout.
+- **Chapter 7 quadratic penalty method** converts equality and inequality
+  constraints into a penalized objective:
+
+```text
+min f(x) + rho/2 * (||h(x)||^2 + ||max(g(x), 0)||^2)
+```
+
+- **Chapter 6 projected Barzilai-Borwein gradient method** solves each
+  penalized subproblem under the box constraint `0 <= x <= 1`. The method takes
+  a gradient step, projects back into the feasible box, and uses BB step sizes
+  for faster iteration.
+- A **discrete repair step** in `solve_warehouse_layout.py` converts the
+  relaxed continuous solution into a feasible 0-1 set that satisfies the count
+  and spacing constraints.
 
 ### Output
 
-`results/warehouse_layout.csv` contains:
+`results/warehouse_layout.csv`:
 
 ```text
 pallet_index,x,y
 ```
 
+Each row is one selected cache/transfer location. The default result selects 10
+positions, with a minimum pairwise Manhattan distance of 7, satisfying the
+`dist > 6` spacing requirement.
+
 ## 7. Experiment Setup
 
-Repository structure:
+Dependencies:
 
 ```text
-data/                    local warehouse CSV data
-algorithms/              self-implemented textbook algorithms
-warehouse_data.py         CSV reading and distance matrix construction
-solve_agv_assignment.py   Task 1 model builder and solver
-solve_dynamic_partition.py Task 2 model builder and solver
-solve_warehouse_layout.py Task 3 model builder and solver
-run_all.py                one-click reproduction entry point
-results/                 generated CSV outputs
-scripts/                 presentation-data and HTML-deck helper scripts
+numpy
+scipy
+matplotlib
+pandas
+networkx
 ```
 
-The workflow is automated:
+Main entry point:
+
+```bash
+python run_all.py
+```
+
+Individual task entry points:
+
+```bash
+python solve_agv_assignment.py
+python solve_dynamic_partition.py
+python solve_warehouse_layout.py
+```
+
+README figures can be regenerated with:
+
+```bash
+python scripts/make_readme_figures.py
+```
+
+## 8. Textbook Chapter and Algorithm Mapping
+
+| Task | Problem type | Textbook chapter | Algorithm | Code |
+| --- | --- | --- | --- | --- |
+| Task 1 AGV assignment | LP relaxation plus integer recovery | Chapter 7 | primal-dual interior-point method | `algorithms/primal_dual_lp.py` |
+| Task 2 dynamic partitioning | linear programming | Chapter 7 | primal-dual interior-point method | `algorithms/primal_dual_lp.py` |
+| Task 3 cache/transfer location selection | spatially constrained 0-1 selection via continuous relaxation | Chapter 7 + Chapter 6 | quadratic penalty + projected BB gradient + repair | `algorithms/quadratic_penalty.py`, `algorithms/projected_bb_gradient.py` |
+
+## 9. Results and Analysis
+
+A typical `python run_all.py` run prints:
 
 ```text
-CSV data -> distance matrices -> model matrices -> textbook algorithms -> CSV results
+[dynamic] status=optimal iter=21 obj=79350.200
+[agv] status=optimal iter=13 lp_obj=131.000 integer_cost=131.000
+[layout] status=optimal outer=2 selected=10 min_dist=7
 ```
 
-## 8. Algorithm-Task Mapping
+Interpretation:
 
-| Task | Problem Type | Algorithm |
-| --- | --- | --- |
-| Task 1 AGV assignment | linear-programming relaxation plus integer recovery | primal-dual interior-point method |
-| Task 2 dynamic partition | linear programming | primal-dual interior-point method |
-| Task 3 layout selection | constrained 0-1 selection via continuous relaxation | quadratic penalty + projected BB gradient + repair |
+- **Task 1** outputs 12 executable transport assignments with total integer
+  route cost 131.
+- **Task 2** outputs 403 nonzero quantity flows with total distance-weighted
+  cost 79350.2, while keeping each workstation above the minimum workload.
+- **Task 3** outputs 10 selected cache/transfer positions with minimum pairwise
+  distance 7, satisfying the spacing requirement.
 
-## 9. Result Summary
-
-Running `python run_all.py` reproduces the three tasks. A typical run
-produces:
-
-```text
-[dynamic] status=optimal obj=79350.200
-[agv] status=optimal integer_cost=131.000
-[layout] status=optimal selected=10 min_dist=7
-```
-
-The results show three different optimization layers:
-
-- Task 1 reduces transport distance for executable AGV routes.
-- Task 2 balances workstation service load while controlling distance cost.
-- Task 3 selects spatially separated cache or transfer positions for layout
-  planning.
+Together, the three experiments show how one warehouse dataset can be turned
+into different optimization models across dispatching, service-area
+organization, and layout planning.
 
 ## 10. Reproduce
 
@@ -264,14 +397,7 @@ pip install -r requirements.txt
 python run_all.py
 ```
 
-You can also run each task separately:
-
-```bash
-python solve_agv_assignment.py
-python solve_dynamic_partition.py
-python solve_warehouse_layout.py
-```
-
-Presentation deliverables, exploratory notebooks, local reference PDFs, virtual
-environments, and intermediate generated artifacts are intentionally excluded
-from the GitHub repository.
+Presentation deliverables, exploratory notebooks, local reference PDFs,
+virtual environments, and intermediate generated artifacts are intentionally
+excluded from the GitHub repository. The repository keeps the code, CSV data,
+figures, and generated results needed for the course project.
