@@ -124,6 +124,9 @@ Data preprocessing includes:
 - parsing the `"SKU:quantity,SKU:quantity"` string in `pallets.csv` into a
   dictionary and aggregating each pallet's total quantity `q(j)`;
 - reading nodes with type `5` in `map.csv` as workstation coordinates;
+- keeping `map.csv` node types `1/2/3/4/6/7/8` as background or raw map nodes
+  rather than separate decision entities; therefore labels such as "node 6/7/8"
+  are no longer shown in the figure legends;
 - reading AGV coordinates from `bots.csv` and sampling 12 AGVs with a fixed
   seed for a reproducible dispatching batch;
 - building AGV-pallet, pallet-workstation, and pallet-pallet distance matrices.
