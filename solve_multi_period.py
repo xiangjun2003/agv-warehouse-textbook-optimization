@@ -1000,6 +1000,7 @@ def simulate_transport_processing_scenario(
         for cache_index, value in enumerate(cache_inventory):
             cache_rows.append(
                 {
+                    "scenario": scenario_name,
                     "period": period,
                     "cache_index": cache_index,
                     "cache_pallet_index": cache_global_indices[cache_index],
@@ -1024,8 +1025,9 @@ def simulate_transport_processing_scenario(
 def summarize_comparison(summary_rows: list[dict[str, object]], route_rows: list[dict[str, object]]):
     scenario_order = {
         "task1_only": 0,
-        "task1_partition": 1,
-        "task1_partition_cache": 2,
+        "task1_cache": 1,
+        "task1_partition": 2,
+        "task1_partition_cache": 3,
     }
     scenarios = sorted(
         {str(row["scenario"]) for row in summary_rows},
@@ -1319,15 +1321,16 @@ def plot_comparison(comparison_rows: list[dict[str, object]], output: Path) -> N
     output.parent.mkdir(parents=True, exist_ok=True)
     label_map = {
         "task1_only": "仅任务1",
+        "task1_cache": "任务1+缓存",
         "task1_partition": "任务1+动态分区",
         "task1_partition_cache": "任务1+动态分区+缓存",
     }
     labels = [label_map.get(str(row["scenario"]), str(row["scenario"])) for row in comparison_rows]
     distances = [float(row["total_agv_distance"]) for row in comparison_rows]
     rounds = [float(row["rounds"]) for row in comparison_rows]
-    colors = [COLORS["direct"], COLORS["agv"], COLORS["cache"]]
+    colors = [COLORS["direct"], COLORS["cache"], COLORS["agv"], COLORS["outbound"]]
 
-    fig, axes = plt.subplots(1, 2, figsize=(12.8, 5.2), dpi=170)
+    fig, axes = plt.subplots(1, 2, figsize=(14.4, 5.35), dpi=170)
     axes[0].bar(labels, distances, color=colors[: len(labels)], edgecolor=COLORS["ink"], linewidth=0.8)
     axes[0].set_title("AGV 总行驶距离", fontsize=15, fontweight="bold")
     axes[0].set_ylabel("Manhattan distance")
@@ -1338,8 +1341,8 @@ def plot_comparison(comparison_rows: list[dict[str, object]], output: Path) -> N
         ax.spines[["top", "right"]].set_visible(False)
         ax.grid(axis="y")
         ax.tick_params(axis="x", labelrotation=10)
-    fig.suptitle("滚动处理消融实验：任务层逐步加入后的结果比较", fontsize=21, fontweight="bold", y=0.98)
-    fig.subplots_adjust(top=0.82, bottom=0.16, left=0.08, right=0.98, wspace=0.28)
+    fig.suptitle("滚动处理消融实验：分区与缓存的独立影响", fontsize=21, fontweight="bold", y=0.98)
+    fig.subplots_adjust(top=0.82, bottom=0.18, left=0.07, right=0.985, wspace=0.25)
     fig.savefig(output, bbox_inches="tight")
     plt.close(fig)
 
@@ -1433,6 +1436,13 @@ def solve_multi_period(
         cache_positions=[],
         use_cache=False,
     )
+    task1_cache_lanes, task1_cache_service_stations = build_transport_lanes(
+        allocation=task1_allocation,
+        pallet_coords=pallet_coords,
+        workstations=data.workstations,
+        cache_positions=selected_cache_positions,
+        use_cache=True,
+    )
     partition_lanes, _ = build_transport_lanes(
         allocation=partition_allocation,
         pallet_coords=pallet_coords,
@@ -1464,6 +1474,22 @@ def solve_multi_period(
         max_rounds=max_rounds,
         verbose=verbose,
     )
+    task1_cache_summary, task1_cache_routes, task1_cache_workload, _task1_cache_snapshots, task1_cache_inventory = simulate_transport_processing_scenario(
+        scenario_name="task1_cache",
+        data=data,
+        pallet_ids=pallet_ids,
+        lanes=task1_cache_lanes,
+        initial_agv_positions=initial_agv_positions,
+        cache_global_indices=[int(idx) for idx in selected_cache_indices],
+        cache_positions=selected_cache_positions,
+        cache_service_stations=task1_cache_service_stations,
+        max_agvs=max_agvs,
+        agv_capacity=agv_capacity,
+        station_capacity=station_capacity,
+        cache_capacity=cache_capacity,
+        max_rounds=max_rounds,
+        verbose=verbose,
+    )
     partition_summary, partition_routes, partition_workload, _partition_snapshots, _ = simulate_transport_processing_scenario(
         scenario_name="task1_partition",
         data=data,
@@ -1480,7 +1506,7 @@ def solve_multi_period(
         max_rounds=max_rounds,
         verbose=verbose,
     )
-    cache_summary, cache_routes, cache_workload, cache_snapshots, cache_inventory = simulate_transport_processing_scenario(
+    partition_cache_summary, partition_cache_routes, partition_cache_workload, partition_cache_snapshots, partition_cache_inventory = simulate_transport_processing_scenario(
         scenario_name="task1_partition_cache",
         data=data,
         pallet_ids=pallet_ids,
@@ -1497,20 +1523,20 @@ def solve_multi_period(
         verbose=verbose,
     )
 
-    summary_rows = task1_summary + partition_summary + cache_summary
-    route_rows = task1_routes + partition_routes + cache_routes
-    workload_rows = task1_workload + partition_workload + cache_workload
+    summary_rows = task1_summary + task1_cache_summary + partition_summary + partition_cache_summary
+    route_rows = task1_routes + task1_cache_routes + partition_routes + partition_cache_routes
+    workload_rows = task1_workload + task1_cache_workload + partition_workload + partition_cache_workload
     comparison_rows = summarize_comparison(summary_rows, route_rows)
 
     write_rows(output_dir / "multi_period_summary.csv", summary_rows)
     write_rows(output_dir / "multi_period_routes.csv", route_rows)
     write_rows(output_dir / "multi_period_workload.csv", workload_rows)
-    write_rows(output_dir / "cache_inventory.csv", cache_inventory)
+    write_rows(output_dir / "cache_inventory.csv", task1_cache_inventory + partition_cache_inventory)
     write_rows(output_dir / "multi_period_partition.csv", partition_rows)
     write_rows(output_dir / "multi_period_comparison.csv", comparison_rows)
     plot_route_maps(
         data=data,
-        snapshots=cache_snapshots,
+        snapshots=partition_cache_snapshots,
         selected_cache_indices=selected_cache_indices,
         output=route_figure_path,
     )
@@ -1563,6 +1589,13 @@ def main() -> None:
             f"agv_distance={float(row['total_agv_distance']):.3f} "
             f"processed={float(row['processed_quantity']):.3f} "
             f"cached={float(row['moved_to_cache_quantity']):.3f}"
+        )
+    if any(row["scenario"] == "task1_cache" for row in comparison_rows):
+        cache_only_result = next(row for row in comparison_rows if row["scenario"] == "task1_cache")
+        print(
+            "cache-only agv-distance saving vs task1="
+            f"{float(cache_only_result.get('agv_distance_saved_vs_task1_only', 0.0)):.3f} "
+            f"({100 * float(cache_only_result.get('agv_distance_saved_pct_vs_task1_only', 0.0)):.2f}%)"
         )
     if any(row["scenario"] == "task1_partition_cache" for row in comparison_rows):
         cache_result = next(row for row in comparison_rows if row["scenario"] == "task1_partition_cache")

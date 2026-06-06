@@ -454,11 +454,13 @@ until all quantities have been processed by workstations. Each AGV carries at
 most `agv_capacity` per round, and each workstation processes at most
 `station_capacity` per round.
 
-The ablation compares three increasingly rich settings:
+The ablation compares four settings so the independent effects of cache and
+dynamic partitioning can be separated:
 
 | Setting | Added decision layer | Operational meaning | AGV delivery endpoint |
 | --- | --- | --- | --- |
 | Task 1 only | AGV dispatching | choose AGV-pallet-workstation tasks by rolling distance | workstation |
+| Task 1 + cache | dispatching + cache points | keep nearest-workstation service, but allow AGVs to use cache points | workstation; cache is only intermediate inventory |
 | Task 1 + dynamic partitioning | dispatching + workstation service areas | Task 2 first assigns each pallet to a primary workstation | assigned workstation |
 | Task 1 + dynamic partitioning + cache | dispatching + service areas + cache state | AGVs may deliver directly, move goods into cache, or replenish workstations from cache | workstation; cache is only intermediate inventory |
 
@@ -486,8 +488,9 @@ The rolling pipeline is:
 ```text
 read orders.csv and pallets.csv to build the t=0 initial demand
   -> Setting A: rolling Task 1 dispatching only
-  -> Setting B: Task 2 primary workstation assignment + rolling Task 1 dispatching
-  -> Setting C: Setting B + Task 3 cache points with rolling cache inventory
+  -> Setting B: Setting A + Task 3 cache points, without dynamic partitioning
+  -> Setting C: Task 2 primary workstation assignment + rolling Task 1 dispatching
+  -> Setting D: Setting C + Task 3 cache points with rolling cache inventory
   -> compare completion rounds, AGV distance, and cache usage
 ```
 
@@ -500,7 +503,7 @@ Default data and parameters:
 - 18 workstations each process at most 160 units per round;
 - Task 3 selects 10 cache points, each with default capacity 600.
 
-The rolling process figure shows the full 9-round process for the third
+The rolling process figure shows the full 9-round process for the fourth
 setting:
 
 - blue triangles: AGV starting positions in the current round;
@@ -515,13 +518,13 @@ setting:
 Outputs:
 
 ```text
-results/multi_period_comparison.csv  ablation metrics: rounds, AGV distance, and cache savings
+results/multi_period_comparison.csv  four-setting ablation metrics: rounds, AGV distance, and cache savings
 results/multi_period_summary.csv     processed quantity, remaining quantity, dispatch count, workstation use, and solver status by round
 results/multi_period_routes.csv      transport/processing records with endpoints, quantity, and distance
 results/multi_period_workload.csv    planned quantity and planned receiver by pallet and round
 results/multi_period_partition.csv   Task 2 dynamic partitioning result under initial demand
 results/cache_inventory.csv          cache inventory by round
-figures/cache_distance_comparison.png ablation comparison figure
+figures/cache_distance_comparison.png four-setting ablation comparison figure
 figures/multi_period_rolling_process.png rolling process figure for the cache setting
 ```
 
@@ -599,32 +602,38 @@ A typical `python solve_multi_period.py` run prints:
 
 ```text
 Rolling ablation optimization
-scenarios=3 route_records=723 time=1.330s
+scenarios=4 route_records=997 time=1.310s
 [task1_only] rounds=10 agv_routes=149 agv_distance=2899.000 processed=8478.000 cached=0.000
+[task1_cache] rounds=12 agv_routes=197 agv_distance=2226.000 processed=8478.000 cached=5086.000
 [task1_partition] rounds=8 agv_routes=149 agv_distance=3322.000 processed=8478.000 cached=0.000
 [task1_partition_cache] rounds=9 agv_routes=177 agv_distance=3060.000 processed=8478.000 cached=2806.000
+cache-only agv-distance saving vs task1=673.000 (23.21%)
 cache agv-distance saving vs partition=262.000 (7.89%)
 ```
 
 The rolling result shows that all demand is fixed at the initial time. With the
 default parameters, Task 1 alone sends goods to nearby workstations and keeps
 AGV distance at 2899, but its workload is concentrated and some workstations
-queue, so completion takes 10 rounds. Adding dynamic partitioning imposes an
-upper workload balance on workstations: AGV distance increases to 3322, but
-completion decreases to 8 rounds. Adding cache points creates 28 additional
-`cache -> workstation` AGV outbound routes, so the total number of AGV routes
-increases to 177 and completion takes 9 rounds. However, cache replaces some
-long direct deliveries with shorter staged movement: AGV distance drops to
-3060, saving 262 versus the partition setting (7.89%).
+queue, so completion takes 10 rounds. Adding cache alone reduces AGV distance
+to 2226, saving 673 versus Task 1 alone (23.21%), but inbound and outbound
+cache trips consume AGV rounds, so completion increases to 12 rounds. Adding
+dynamic partitioning imposes an upper workload balance on workstations: AGV
+distance increases to 3322, but completion decreases to 8 rounds. Adding both
+dynamic partitioning and cache creates 28 additional `cache -> workstation`
+AGV outbound routes and finishes in 9 rounds; AGV distance drops to 3060,
+saving 262 versus the partition setting (7.89%).
 
 This result shows that cache points do not automatically reduce both distance
 and time. Their value is to replace some long small-batch direct deliveries
 with short inbound cache replenishment and batched outbound replenishment. The
 tradeoff is that outbound cache delivery also consumes AGV capacity and rounds.
+Dynamic partitioning mainly improves workstation load rhythm and completion
+time. In short, cache is more distance-oriented, while partitioning is more
+throughput-oriented.
 
-Together, the three experiments show how one warehouse dataset can be turned
-into different optimization models across dispatching, service-area
-organization, and layout planning.
+Together, the task experiments and the rolling ablation show how one warehouse
+dataset can be turned into different optimization models across dispatching,
+service-area organization, and layout planning.
 
 ## 11. Reproduce
 
