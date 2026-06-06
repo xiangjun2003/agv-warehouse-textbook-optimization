@@ -12,12 +12,8 @@ __pycache__/
 outputs/
 agv-textbook-beautified-preview/
 
-# Keep only the final no-COPT presentation artifacts in Git.
-deliverables/*
-!deliverables/agv-warehouse-textbook-optimization-image-to-editable-edited.pptx
-!deliverables/agv-warehouse-textbook-optimization-image-to-editable-validation.json
-!deliverables/agv-warehouse-textbook-optimization-animated.html
-!deliverables/agv-warehouse-textbook-optimization-native.html
+# Presentation artifacts are kept locally and not uploaded to GitHub for now.
+deliverables/
 
 # Local helper for the image-to-editable subagent run.
 scripts/write_image_to_editable_page_prompts.py
