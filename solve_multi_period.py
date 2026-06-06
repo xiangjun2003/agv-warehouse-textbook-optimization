@@ -183,7 +183,7 @@ def solve_balanced_partition_plan(
     quantities: np.ndarray,
     costs: np.ndarray,
     *,
-    alpha: float = 0.6,
+    alpha: float = 1.15,
     verbose: bool = False,
 ) -> tuple[LPResult, np.ndarray, np.ndarray, np.ndarray, float]:
     source_count, station_count = costs.shape
@@ -205,11 +205,11 @@ def solve_balanced_partition_plan(
         row += 1
 
     total_quantity = float(np.sum(quantities))
-    min_station_load = alpha * total_quantity / station_count
+    max_station_load = alpha * total_quantity / station_count
     for station_index in range(station_count):
         A[row, station_index:flow_count:station_count] = 1.0
-        A[row, flow_count + station_index] = -1.0
-        b[row] = min_station_load
+        A[row, flow_count + station_index] = 1.0
+        b[row] = max_station_load
         row += 1
 
     result = solve_lp_primal_dual(
@@ -478,184 +478,170 @@ def _snapshot_route_from_row(row: dict[str, object]) -> dict[str, object]:
     }
 
 
-def solve_direct_delivery_scenario(
-    *,
-    scenario_name: str = "task1_only",
-    data,
-    pallet_ids: list[int],
-    pallet_coords: list[tuple[int, int]],
-    initial_demand: np.ndarray,
-    initial_agv_positions: list[tuple[int, int]],
-    primary_stations: np.ndarray | None = None,
-    max_agvs: int,
-    agv_capacity: float,
-    station_capacity: float,
-    max_rounds: int,
-    verbose: bool = False,
-) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
-    pending = initial_demand.astype(float).copy()
-    agv_positions = list(initial_agv_positions)
-    summaries: list[dict[str, object]] = []
-    routes: list[dict[str, object]] = []
-    workloads: list[dict[str, object]] = []
-    snapshots: list[dict[str, object]] = []
-
-    period = 0
-    while float(np.sum(pending)) > 1e-8 and period < max_rounds:
-        period += 1
-        active_indices = np.flatnonzero(pending > 1e-8)
-        active_positions = [pallet_coords[int(idx)] for idx in active_indices]
-        active_quantities = pending[active_indices].copy()
-        raw_direct_costs = distance_matrix(active_positions, data.workstations)
-        direct_costs = restrict_costs_to_primary_stations(
-            raw_direct_costs,
-            active_indices,
-            primary_stations,
-        )
-        plan_result, flows, station_loads, objective = solve_flow_plan(
-            active_quantities,
-            direct_costs,
-            receiver_capacities=station_capacity,
-            total_capacity=max_agvs * agv_capacity,
-            verbose=verbose,
-        )
-        selected = select_flow_tasks(
-            active_quantities,
-            flows,
-            direct_costs,
-            receiver_capacities=station_capacity,
-            max_tasks=max_agvs,
-            agv_capacity=agv_capacity,
-            unique_source=True,
-            max_allowed_cost=100_000.0 if primary_stations is not None else None,
-        )
-        tasks: list[dict[str, object]] = []
-        for task in selected:
-            local_pallet = int(task["source_index"])
-            global_pallet = int(active_indices[local_pallet])
-            station = int(task["receiver_index"])
-            tasks.append(
-                {
-                    "route_type": "direct",
-                    "pallet_index": global_pallet,
-                    "cache_index": None,
-                    "workstation_index": station,
-                    "quantity": float(task["quantity"]),
-                    "processed_quantity": float(task["quantity"]),
-                    "moved_to_cache_quantity": 0.0,
-                    "pickup": pallet_coords[global_pallet],
-                    "drop": data.workstations[station],
-                }
-            )
-        assignment_result, assignments, round_distance = solve_task_assignment(
-            agv_positions,
-            tasks,
-            verbose=verbose,
-        )
-
-        next_agv_positions = list(agv_positions)
-        actual_station_loads = np.zeros(len(data.workstations), dtype=float)
-        processed = 0.0
-        dispatched_global: list[int] = []
-        for assignment in assignments:
-            agv_index = int(assignment["agv_index"])
-            pallet_index = int(assignment["pallet_index"])
-            station = int(assignment["workstation_index"])
-            quantity = min(float(assignment["quantity"]), pending[pallet_index])
-            pending[pallet_index] -= quantity
-            processed += quantity
-            actual_station_loads[station] += quantity
-            next_agv_positions[agv_index] = assignment["drop"]
-            dispatched_global.append(pallet_index)
-            assignment["quantity"] = quantity
-            assignment["processed_quantity"] = quantity
-            routes.append(
-                _task_row(
-                    scenario=scenario_name,
-                    period=period,
-                    assignment=assignment,
-                    pallet_ids=pallet_ids,
-                    cache_global_indices=[],
-                )
-            )
-
-        for local_index, global_index in enumerate(active_indices):
-            main_station = int(np.argmax(flows[local_index]))
-            workloads.append(
-                {
-                    "scenario": scenario_name,
-                    "period": period,
-                    "pallet_index": int(global_index),
-                    "pallet_id": pallet_ids[int(global_index)],
-                    "pending_quantity_before_round": f"{active_quantities[local_index]:.8f}",
-                    "planned_quantity_this_round": f"{float(np.sum(flows[local_index])):.8f}",
-                    "planned_receiver_type": "workstation",
-                    "planned_receiver_index": main_station,
-                    "dispatched": int(int(global_index) in set(dispatched_global)),
-                }
-            )
-
-        pending = np.maximum(pending, 0.0)
-        remaining_indices = np.flatnonzero(pending > 1e-8)
-        nonzero_station = actual_station_loads[actual_station_loads > 1e-8]
-        summaries.append(
-            {
-                "scenario": scenario_name,
-                "period": period,
-                "active_pallets_before": int(len(active_indices)),
-                "dispatched_routes": int(len(assignments)),
-                "direct_routes": int(len(assignments)),
-                "inbound_routes": 0,
-                "outbound_routes": 0,
-                "processed_quantity": float(processed),
-                "moved_to_cache_quantity": 0.0,
-                "remaining_pallets_after": int(len(remaining_indices)),
-                "remaining_quantity_after": float(np.sum(pending)),
-                "cache_quantity_after": 0.0,
-                "station_count_used": int(np.count_nonzero(actual_station_loads > 1e-8)),
-                "min_station_processed": float(np.min(nonzero_station)) if len(nonzero_station) else 0.0,
-                "max_station_processed": float(np.max(nonzero_station)) if len(nonzero_station) else 0.0,
-                "plan_status": plan_result.status,
-                "plan_iterations": plan_result.iterations,
-                "assignment_status": assignment_result.status,
-                "assignment_iterations": assignment_result.iterations,
-                "plan_objective": float(objective),
-                "round_distance": float(round_distance),
-            }
-        )
-        snapshots.append(
-            {
-                "scenario": scenario_name,
-                "period": period,
-                "active_indices": active_indices.copy(),
-                "pending_quantities": active_quantities.copy(),
-                "dispatched_indices": np.asarray(dispatched_global, dtype=int),
-                "routes": [_snapshot_route(row) for row in assignments],
-                "agv_starts": np.asarray(agv_positions, dtype=float),
-                "processed_quantity": processed,
-                "remaining_quantity_after": float(np.sum(pending)),
-            }
-        )
-        agv_positions = next_agv_positions
-
-    if float(np.sum(pending)) > 1e-8:
-        raise RuntimeError(f"{scenario_name} reached max_rounds before completion")
-    return summaries, routes, workloads, snapshots
-
-
 def _manhattan(a: tuple[int, int], b: tuple[int, int]) -> float:
     return float(abs(a[0] - b[0]) + abs(a[1] - b[1]))
 
 
-def process_cache_inventory(
+def build_nearest_allocation(demand: np.ndarray, costs: np.ndarray) -> np.ndarray:
+    allocation = np.zeros_like(costs, dtype=float)
+    nearest = np.argmin(costs, axis=1)
+    for pallet_index, quantity in enumerate(demand):
+        if quantity > 1e-8:
+            allocation[pallet_index, int(nearest[pallet_index])] = float(quantity)
+    return allocation
+
+
+def repair_partition_to_primary_allocation(
+    demand: np.ndarray,
+    costs: np.ndarray,
+    relaxed_flows: np.ndarray,
+    *,
+    alpha: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    station_count = costs.shape[1]
+    max_station_load = float(alpha) * float(np.sum(demand)) / station_count
+    allocation = np.zeros_like(costs, dtype=float)
+    station_loads = np.zeros(station_count, dtype=float)
+    primary = np.full(costs.shape[0], -1, dtype=int)
+    pallet_order = np.argsort(-demand)
+
+    for raw_pallet_index in pallet_order:
+        pallet_index = int(raw_pallet_index)
+        quantity = float(demand[pallet_index])
+        if quantity <= 1e-8:
+            continue
+        station_order = np.lexsort((costs[pallet_index], -relaxed_flows[pallet_index]))
+        chosen_station = None
+        for raw_station in station_order:
+            station = int(raw_station)
+            if station_loads[station] + quantity <= max_station_load + 1e-8:
+                chosen_station = station
+                break
+        if chosen_station is None:
+            overload = np.maximum(0.0, station_loads + quantity - max_station_load)
+            chosen_station = int(np.lexsort((costs[pallet_index], overload))[0])
+        allocation[pallet_index, chosen_station] = quantity
+        station_loads[chosen_station] += quantity
+        primary[pallet_index] = chosen_station
+    return allocation, primary, station_loads
+
+
+def build_transport_lanes(
+    *,
+    allocation: np.ndarray,
+    pallet_coords: list[tuple[int, int]],
+    workstations: list[tuple[int, int]],
+    cache_positions: list[tuple[int, int]] | None = None,
+    use_cache: bool = False,
+) -> tuple[list[dict[str, object]], np.ndarray]:
+    lanes: list[dict[str, object]] = []
+    cache_service_stations = np.asarray([], dtype=int)
+    if cache_positions:
+        cache_service_stations = np.argmin(distance_matrix(cache_positions, workstations), axis=1).astype(int)
+        pallet_cache_distances = distance_matrix(pallet_coords, cache_positions)
+    else:
+        pallet_cache_distances = np.empty((len(pallet_coords), 0), dtype=float)
+    pallet_station_distances = distance_matrix(pallet_coords, workstations)
+
+    for pallet_index in range(allocation.shape[0]):
+        for station_index in range(allocation.shape[1]):
+            quantity = float(allocation[pallet_index, station_index])
+            if quantity <= 1e-6:
+                continue
+            endpoint_type = "workstation"
+            cache_index = None
+            drop = workstations[station_index]
+            if use_cache and len(cache_service_stations) > 0:
+                candidate_caches = np.flatnonzero(cache_service_stations == station_index)
+                if len(candidate_caches) > 0:
+                    best_cache = int(candidate_caches[np.argmin(pallet_cache_distances[pallet_index, candidate_caches])])
+                    if float(pallet_cache_distances[pallet_index, best_cache]) < float(pallet_station_distances[pallet_index, station_index]):
+                        endpoint_type = "cache"
+                        cache_index = best_cache
+                        drop = cache_positions[best_cache]  # type: ignore[index]
+            lanes.append(
+                {
+                    "lane_id": len(lanes),
+                    "pallet_index": int(pallet_index),
+                    "station_index": int(station_index),
+                    "endpoint_type": endpoint_type,
+                    "cache_index": cache_index,
+                    "remaining": quantity,
+                    "pickup": pallet_coords[pallet_index],
+                    "drop": drop,
+                    "delivery_distance": _manhattan(pallet_coords[pallet_index], drop),
+                }
+            )
+    return lanes, cache_service_stations
+
+
+def select_transport_tasks(
+    lanes: list[dict[str, object]],
+    *,
+    max_tasks: int,
+    agv_capacity: float,
+) -> list[dict[str, object]]:
+    candidates: list[dict[str, object]] = []
+    for lane in lanes:
+        remaining = float(lane["remaining"])
+        chunk_index = 0
+        while remaining > 1e-8 and chunk_index < max_tasks:
+            quantity = min(float(agv_capacity), remaining)
+            candidates.append(
+                {
+                    "lane_id": int(lane["lane_id"]),
+                    "pallet_index": int(lane["pallet_index"]),
+                    "station_index": int(lane["station_index"]),
+                    "endpoint_type": lane["endpoint_type"],
+                    "cache_index": lane["cache_index"],
+                    "quantity": quantity,
+                    "pickup": lane["pickup"],
+                    "drop": lane["drop"],
+                    "delivery_distance": float(lane["delivery_distance"]),
+                }
+            )
+            remaining -= quantity
+            chunk_index += 1
+    candidates.sort(key=lambda row: (float(row["delivery_distance"]), -float(row["quantity"]), int(row["lane_id"])))
+    selected = candidates[:max_tasks]
+    tasks: list[dict[str, object]] = []
+    for candidate in selected:
+        if candidate["endpoint_type"] == "cache":
+            route_type = "pallet_to_cache"
+            moved_to_cache = float(candidate["quantity"])
+            processed = 0.0
+        else:
+            route_type = "direct"
+            moved_to_cache = 0.0
+            processed = 0.0
+        tasks.append(
+            {
+                "transport_mode": "agv",
+                "route_type": route_type,
+                "lane_id": int(candidate["lane_id"]),
+                "pallet_index": int(candidate["pallet_index"]),
+                "cache_index": candidate["cache_index"],
+                "workstation_index": int(candidate["station_index"]),
+                "quantity": float(candidate["quantity"]),
+                "processed_quantity": processed,
+                "moved_to_cache_quantity": moved_to_cache,
+                "pickup": candidate["pickup"],
+                "drop": candidate["drop"],
+            }
+        )
+    return tasks
+
+
+def process_station_available(
     *,
     scenario_name: str,
     period: int,
     data,
+    station_queues: np.ndarray,
     cache_inventory: np.ndarray,
     cache_positions: list[tuple[int, int]],
     cache_service_stations: np.ndarray,
-    station_remaining: np.ndarray,
+    station_capacity: float,
     pallet_ids: list[int],
     cache_global_indices: list[int],
 ) -> tuple[list[dict[str, object]], float, np.ndarray]:
@@ -663,6 +649,40 @@ def process_cache_inventory(
     processed_by_station = np.zeros(len(data.workstations), dtype=float)
     processed_total = 0.0
     for station in range(len(data.workstations)):
+        remaining_capacity = float(station_capacity)
+        if station_queues[station] > 1e-8:
+            quantity = min(float(station_queues[station]), remaining_capacity)
+            station_queues[station] -= quantity
+            remaining_capacity -= quantity
+            processed_total += quantity
+            processed_by_station[station] += quantity
+            rows.append(
+                _task_row(
+                    scenario=scenario_name,
+                    period=period,
+                    assignment={
+                        "transport_mode": "station_process",
+                        "route_type": "workstation_process",
+                        "agv_index": "",
+                        "pallet_index": None,
+                        "cache_index": None,
+                        "workstation_index": station,
+                        "quantity": quantity,
+                        "processed_quantity": quantity,
+                        "moved_to_cache_quantity": 0.0,
+                        "start": data.workstations[station],
+                        "pickup": data.workstations[station],
+                        "drop": data.workstations[station],
+                        "pickup_distance": 0.0,
+                        "delivery_distance": 0.0,
+                        "route_cost": 0.0,
+                    },
+                    pallet_ids=pallet_ids,
+                    cache_global_indices=cache_global_indices,
+                )
+            )
+        if remaining_capacity <= 1e-8 or len(cache_inventory) == 0:
+            continue
         station_caches = [
             cache_index
             for cache_index, service_station in enumerate(cache_service_stations)
@@ -675,16 +695,14 @@ def process_cache_inventory(
             )
         )
         for cache_index in station_caches:
-            if station_remaining[station] <= 1e-8:
+            if remaining_capacity <= 1e-8:
                 break
-            quantity = min(float(cache_inventory[cache_index]), float(station_remaining[station]))
-            if quantity <= 1e-8:
-                continue
+            quantity = min(float(cache_inventory[cache_index]), remaining_capacity)
             distance = _manhattan(cache_positions[cache_index], data.workstations[station])
             cache_inventory[cache_index] -= quantity
-            station_remaining[station] -= quantity
-            processed_by_station[station] += quantity
+            remaining_capacity -= quantity
             processed_total += quantity
+            processed_by_station[station] += quantity
             rows.append(
                 _task_row(
                     scenario=scenario_name,
@@ -713,17 +731,16 @@ def process_cache_inventory(
     return rows, processed_total, processed_by_station
 
 
-def solve_partition_cache_scenario(
+def simulate_transport_processing_scenario(
     *,
     scenario_name: str,
     data,
     pallet_ids: list[int],
-    pallet_coords: list[tuple[int, int]],
-    initial_demand: np.ndarray,
+    lanes: list[dict[str, object]],
     initial_agv_positions: list[tuple[int, int]],
-    primary_stations: np.ndarray,
     cache_global_indices: list[int],
     cache_positions: list[tuple[int, int]],
+    cache_service_stations: np.ndarray,
     max_agvs: int,
     agv_capacity: float,
     station_capacity: float,
@@ -731,151 +748,37 @@ def solve_partition_cache_scenario(
     max_rounds: int,
     verbose: bool = False,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], list[dict[str, object]], list[dict[str, object]]]:
-    pending = initial_demand.astype(float).copy()
-    cache_inventory = np.zeros(len(cache_positions), dtype=float)
-    cache_service_stations = np.argmin(distance_matrix(cache_positions, data.workstations), axis=1).astype(int)
     agv_positions = list(initial_agv_positions)
+    station_queues = np.zeros(len(data.workstations), dtype=float)
+    cache_inventory = np.zeros(len(cache_positions), dtype=float)
     summaries: list[dict[str, object]] = []
     routes: list[dict[str, object]] = []
     workloads: list[dict[str, object]] = []
     snapshots: list[dict[str, object]] = []
     cache_rows: list[dict[str, object]] = []
 
-    station_count = len(data.workstations)
-    cache_count = len(cache_positions)
     period = 0
-    while (float(np.sum(pending)) + float(np.sum(cache_inventory))) > 1e-8 and period < max_rounds:
+    while (
+        sum(float(lane["remaining"]) for lane in lanes)
+        + float(np.sum(station_queues))
+        + float(np.sum(cache_inventory))
+    ) > 1e-8 and period < max_rounds:
         period += 1
-        active_indices = np.flatnonzero(pending > 1e-8)
-        active_positions = [pallet_coords[int(idx)] for idx in active_indices]
-        active_quantities = pending[active_indices].copy()
-        cache_before = cache_inventory.copy()
-        station_remaining = capacity_vector(station_capacity, station_count)
-
-        station_rows, cache_processed, actual_station_loads = process_cache_inventory(
-            scenario_name=scenario_name,
-            period=period,
-            data=data,
-            cache_inventory=cache_inventory,
-            cache_positions=cache_positions,
-            cache_service_stations=cache_service_stations,
-            station_remaining=station_remaining,
-            pallet_ids=pallet_ids,
-            cache_global_indices=cache_global_indices,
+        active_lanes = [lane for lane in lanes if float(lane["remaining"]) > 1e-8]
+        active_indices = np.asarray(sorted({int(lane["pallet_index"]) for lane in active_lanes}), dtype=int)
+        pending_quantities = np.asarray(
+            [
+                sum(float(lane["remaining"]) for lane in active_lanes if int(lane["pallet_index"]) == int(pallet_index))
+                for pallet_index in active_indices
+            ],
+            dtype=float,
         )
-        routes.extend(station_rows)
-
-        selected: list[dict[str, float | int]] = []
-        endpoint_costs = np.zeros((len(active_indices), station_count + cache_count), dtype=float)
-        plan_status = "skipped"
-        plan_iter = 0
-        objective = 0.0
-        if len(active_indices) > 0:
-            raw_direct_costs = distance_matrix(active_positions, data.workstations)
-            direct_costs = restrict_costs_to_primary_stations(
-                raw_direct_costs,
-                active_indices,
-                primary_stations,
-            )
-            cache_costs = np.full((len(active_indices), cache_count), 1_000_000.0, dtype=float)
-            pallet_cache_distances = distance_matrix(active_positions, cache_positions)
-            for local_index, global_index in enumerate(active_indices):
-                station = int(primary_stations[int(global_index)])
-                direct_distance = float(raw_direct_costs[local_index, station])
-                for cache_index in range(cache_count):
-                    if int(cache_service_stations[cache_index]) != station:
-                        continue
-                    cache_distance = float(pallet_cache_distances[local_index, cache_index])
-                    if cache_distance <= direct_distance:
-                        cache_costs[local_index, cache_index] = cache_distance
-
-            endpoint_costs = np.hstack([direct_costs, cache_costs])
-            endpoint_capacities = np.concatenate(
-                [
-                    station_remaining,
-                    np.maximum(capacity_vector(cache_capacity, cache_count) - cache_inventory, 0.0),
-                ]
-            )
-            if float(np.sum(endpoint_capacities)) > 1e-8:
-                plan_result, endpoint_flows, _, objective = solve_flow_plan(
-                    active_quantities,
-                    endpoint_costs,
-                    receiver_capacities=endpoint_capacities,
-                    total_capacity=max_agvs * agv_capacity,
-                    verbose=verbose,
-                )
-                plan_status = plan_result.status
-                plan_iter = plan_result.iterations
-                selected = select_flow_tasks(
-                    active_quantities,
-                    endpoint_flows,
-                    endpoint_costs,
-                    receiver_capacities=endpoint_capacities,
-                    max_tasks=max_agvs,
-                    agv_capacity=agv_capacity,
-                    unique_source=True,
-                    max_allowed_cost=100_000.0,
-                )
-                for local_index, global_index in enumerate(active_indices):
-                    receiver = int(np.argmax(endpoint_flows[local_index]))
-                    if receiver < station_count:
-                        receiver_type = "workstation"
-                        receiver_index = receiver
-                    else:
-                        receiver_type = "cache"
-                        receiver_index = receiver - station_count
-                    workloads.append(
-                        {
-                            "scenario": scenario_name,
-                            "period": period,
-                            "pallet_index": int(global_index),
-                            "pallet_id": pallet_ids[int(global_index)],
-                            "pending_quantity_before_round": f"{active_quantities[local_index]:.8f}",
-                            "planned_quantity_this_round": f"{float(np.sum(endpoint_flows[local_index])):.8f}",
-                            "planned_receiver_type": receiver_type,
-                            "planned_receiver_index": receiver_index,
-                            "dispatched": 0,
-                        }
-                    )
-
-        tasks: list[dict[str, object]] = []
-        for task in selected:
-            local_pallet = int(task["source_index"])
-            global_pallet = int(active_indices[local_pallet])
-            receiver = int(task["receiver_index"])
-            quantity = float(task["quantity"])
-            if receiver < station_count:
-                station = receiver
-                tasks.append(
-                    {
-                        "transport_mode": "agv",
-                        "route_type": "direct",
-                        "pallet_index": global_pallet,
-                        "cache_index": None,
-                        "workstation_index": station,
-                        "quantity": quantity,
-                        "processed_quantity": quantity,
-                        "moved_to_cache_quantity": 0.0,
-                        "pickup": pallet_coords[global_pallet],
-                        "drop": data.workstations[station],
-                    }
-                )
-            else:
-                cache_index = receiver - station_count
-                tasks.append(
-                    {
-                        "transport_mode": "agv",
-                        "route_type": "pallet_to_cache",
-                        "pallet_index": global_pallet,
-                        "cache_index": cache_index,
-                        "workstation_index": int(cache_service_stations[cache_index]),
-                        "quantity": quantity,
-                        "processed_quantity": 0.0,
-                        "moved_to_cache_quantity": quantity,
-                        "pickup": pallet_coords[global_pallet],
-                        "drop": cache_positions[cache_index],
-                    }
-                )
+        cache_before = cache_inventory.copy()
+        tasks = select_transport_tasks(
+            lanes,
+            max_tasks=max_agvs,
+            agv_capacity=agv_capacity,
+        )
 
         assignments: list[dict[str, object]] = []
         assignment_status = "skipped"
@@ -889,40 +792,36 @@ def solve_partition_cache_scenario(
             )
             assignment_status = assignment_result.status
             assignment_iter = assignment_result.iterations
-        elif len(active_indices) > 0 and float(np.sum(cache_inventory)) <= 1e-8:
-            raise RuntimeError(f"{scenario_name} selected no feasible AGV task")
 
         next_agv_positions = list(agv_positions)
-        processed = float(cache_processed)
-        moved_to_cache = 0.0
         dispatched_global: list[int] = []
+        moved_to_cache = 0.0
+        direct_delivered = 0.0
         for assignment in assignments:
-            agv_index = int(assignment["agv_index"])
-            route_type = str(assignment["route_type"])
-            pallet_index = int(assignment["pallet_index"])
-            quantity = min(float(assignment["quantity"]), pending[pallet_index])
-            if route_type == "direct":
-                station = int(assignment["workstation_index"])
-                quantity = min(quantity, float(station_remaining[station]))
-                pending[pallet_index] -= quantity
-                station_remaining[station] -= quantity
-                actual_station_loads[station] += quantity
-                processed += quantity
-                assignment["quantity"] = quantity
-                assignment["processed_quantity"] = quantity
-            elif route_type == "pallet_to_cache":
+            lane_id = int(assignment["lane_id"])
+            lane = lanes[lane_id]
+            quantity = min(float(assignment["quantity"]), float(lane["remaining"]))
+            if quantity <= 1e-8:
+                continue
+            assignment["quantity"] = quantity
+            station = int(assignment["workstation_index"])
+            if assignment["route_type"] == "pallet_to_cache":
                 cache_index = int(assignment["cache_index"])
                 free_space = max(0.0, float(cache_capacity) - float(cache_inventory[cache_index]))
                 quantity = min(quantity, free_space)
-                pending[pallet_index] -= quantity
-                cache_inventory[cache_index] += quantity
-                moved_to_cache += quantity
+                if quantity <= 1e-8:
+                    continue
                 assignment["quantity"] = quantity
+                cache_inventory[cache_index] += quantity
                 assignment["moved_to_cache_quantity"] = quantity
+                moved_to_cache += quantity
             else:
-                raise ValueError(f"unexpected route_type {route_type}")
-            next_agv_positions[agv_index] = assignment["drop"]
-            dispatched_global.append(pallet_index)
+                station_queues[station] += quantity
+                assignment["moved_to_cache_quantity"] = 0.0
+                direct_delivered += quantity
+            lane["remaining"] = float(lane["remaining"]) - quantity
+            next_agv_positions[int(assignment["agv_index"])] = assignment["drop"]
+            dispatched_global.append(int(assignment["pallet_index"]))
             routes.append(
                 _task_row(
                     scenario=scenario_name,
@@ -932,16 +831,39 @@ def solve_partition_cache_scenario(
                     cache_global_indices=cache_global_indices,
                 )
             )
+            workloads.append(
+                {
+                    "scenario": scenario_name,
+                    "period": period,
+                    "pallet_index": int(assignment["pallet_index"]),
+                    "pallet_id": pallet_ids[int(assignment["pallet_index"])],
+                    "pending_quantity_before_round": "",
+                    "planned_quantity_this_round": f"{quantity:.8f}",
+                    "planned_receiver_type": "cache" if assignment["route_type"] == "pallet_to_cache" else "workstation",
+                    "planned_receiver_index": int(assignment["cache_index"]) if assignment["route_type"] == "pallet_to_cache" else station,
+                    "dispatched": 1,
+                }
+            )
 
-        if workloads:
-            dispatched_set = set(dispatched_global)
-            for row in workloads:
-                if row["scenario"] == scenario_name and row["period"] == period:
-                    row["dispatched"] = int(int(row["pallet_index"]) in dispatched_set)
-
-        pending = np.maximum(pending, 0.0)
-        cache_inventory = np.maximum(cache_inventory, 0.0)
-        remaining_indices = np.flatnonzero(pending > 1e-8)
+        process_rows, processed, actual_station_loads = process_station_available(
+            scenario_name=scenario_name,
+            period=period,
+            data=data,
+            station_queues=station_queues,
+            cache_inventory=cache_inventory,
+            cache_positions=cache_positions,
+            cache_service_stations=cache_service_stations,
+            station_capacity=station_capacity,
+            pallet_ids=pallet_ids,
+            cache_global_indices=cache_global_indices,
+        )
+        routes.extend(process_rows)
+        remaining_quantity = sum(float(lane["remaining"]) for lane in lanes)
+        remaining_indices = {
+            int(lane["pallet_index"])
+            for lane in lanes
+            if float(lane["remaining"]) > 1e-8
+        }
         nonzero_station = actual_station_loads[actual_station_loads > 1e-8]
         summaries.append(
             {
@@ -952,20 +874,22 @@ def solve_partition_cache_scenario(
                 "direct_routes": int(sum(1 for row in assignments if row["route_type"] == "direct")),
                 "inbound_routes": int(sum(1 for row in assignments if row["route_type"] == "pallet_to_cache")),
                 "outbound_routes": 0,
-                "station_pull_routes": int(len(station_rows)),
+                "station_pull_routes": int(sum(1 for row in process_rows if row["route_type"] == "cache_to_workstation")),
                 "processed_quantity": float(processed),
+                "direct_delivered_quantity": float(direct_delivered),
                 "moved_to_cache_quantity": float(moved_to_cache),
                 "remaining_pallets_after": int(len(remaining_indices)),
-                "remaining_quantity_after": float(np.sum(pending)),
+                "remaining_quantity_after": float(remaining_quantity),
+                "station_queue_after": float(np.sum(station_queues)),
                 "cache_quantity_after": float(np.sum(cache_inventory)),
                 "station_count_used": int(np.count_nonzero(actual_station_loads > 1e-8)),
                 "min_station_processed": float(np.min(nonzero_station)) if len(nonzero_station) else 0.0,
                 "max_station_processed": float(np.max(nonzero_station)) if len(nonzero_station) else 0.0,
-                "plan_status": plan_status,
-                "plan_iterations": int(plan_iter),
+                "plan_status": "heuristic",
+                "plan_iterations": 0,
                 "assignment_status": assignment_status,
                 "assignment_iterations": int(assignment_iter),
-                "plan_objective": float(objective),
+                "plan_objective": 0.0,
                 "round_distance": float(round_distance),
             }
         )
@@ -974,13 +898,13 @@ def solve_partition_cache_scenario(
                 "scenario": scenario_name,
                 "period": period,
                 "active_indices": active_indices.copy(),
-                "pending_quantities": active_quantities.copy(),
+                "pending_quantities": pending_quantities.copy(),
                 "dispatched_indices": np.asarray(dispatched_global, dtype=int),
-                "routes": [_snapshot_route_from_row(row) for row in station_rows]
-                + [_snapshot_route(row) for row in assignments],
+                "routes": [_snapshot_route(row) for row in assignments]
+                + [_snapshot_route_from_row(row) for row in process_rows],
                 "agv_starts": np.asarray(agv_positions, dtype=float),
                 "processed_quantity": processed,
-                "remaining_quantity_after": float(np.sum(pending)),
+                "remaining_quantity_after": float(remaining_quantity),
                 "cache_quantity_after": float(np.sum(cache_inventory)),
             }
         )
@@ -992,14 +916,18 @@ def solve_partition_cache_scenario(
                     "cache_pallet_index": cache_global_indices[cache_index],
                     "cache_x": cache_positions[cache_index][0],
                     "cache_y": cache_positions[cache_index][1],
-                    "service_workstation_index": int(cache_service_stations[cache_index]),
+                    "service_workstation_index": int(cache_service_stations[cache_index]) if len(cache_service_stations) else "",
                     "inventory_before": f"{cache_before[cache_index]:.8f}",
                     "inventory_after": f"{value:.8f}",
                 }
             )
         agv_positions = next_agv_positions
 
-    if (float(np.sum(pending)) + float(np.sum(cache_inventory))) > 1e-8:
+    if (
+        sum(float(lane["remaining"]) for lane in lanes)
+        + float(np.sum(station_queues))
+        + float(np.sum(cache_inventory))
+    ) > 1e-8:
         raise RuntimeError(f"{scenario_name} reached max_rounds before completion")
     return summaries, routes, workloads, snapshots, cache_rows
 
@@ -1124,7 +1052,7 @@ def plot_route_maps(
     output.parent.mkdir(parents=True, exist_ok=True)
     columns = 3
     rows = int(np.ceil(len(snapshots) / columns))
-    fig_height = 2.75 + rows * 3.25
+    fig_height = 3.35 + rows * 3.35
     fig, axes = plt.subplots(rows, columns, figsize=(18.5, fig_height), dpi=170)
     axes = np.asarray(axes).ravel()
     nodes = np.asarray([(x, y) for _, x, y in data.nodes], dtype=float)
@@ -1280,11 +1208,11 @@ def plot_route_maps(
         fontsize=27,
         fontweight="bold",
         color=COLORS["ink"],
-        y=0.992,
+        y=0.986,
     )
     fig.text(
         0.5,
-        0.972,
+        0.955,
         "缓存库存随轮次更新：AGV 将托盘补入缓存，工位按处理速度从缓存点消化。",
         ha="center",
         va="top",
@@ -1292,7 +1220,7 @@ def plot_route_maps(
         fontweight="semibold",
         color=COLORS["muted"],
     )
-    fig.subplots_adjust(left=0.045, right=0.99, top=0.94, bottom=0.055, wspace=0.13, hspace=0.42)
+    fig.subplots_adjust(left=0.045, right=0.99, top=0.875, bottom=0.07, wspace=0.13, hspace=0.42)
     fig.savefig(output, bbox_inches="tight")
     plt.close(fig)
 
@@ -1347,10 +1275,11 @@ def solve_multi_period(
     *,
     seed: int = 0,
     sample_prob: float = 0.6,
-    max_agvs: int = 12,
-    agv_capacity: float = 80.0,
+    max_agvs: int = 24,
+    agv_capacity: float = 120.0,
     station_capacity: float = 160.0,
     cache_capacity: float = 600.0,
+    balance_alpha: float = 1.15,
     choose_count: int = 10,
     min_distance: int = 6,
     max_rounds: int = 240,
@@ -1383,13 +1312,19 @@ def solve_multi_period(
     partition_result, partition_flows, primary_stations, partition_loads, partition_objective = solve_balanced_partition_plan(
         demand,
         partition_costs,
-        alpha=0.6,
+        alpha=balance_alpha,
         verbose=verbose,
     )
+    partition_allocation, primary_stations, partition_loads = repair_partition_to_primary_allocation(
+        demand,
+        partition_costs,
+        partition_flows,
+        alpha=balance_alpha,
+    )
     partition_rows: list[dict[str, object]] = []
-    for pallet_index in range(partition_flows.shape[0]):
-        for station_index in range(partition_flows.shape[1]):
-            quantity = float(partition_flows[pallet_index, station_index])
+    for pallet_index in range(partition_allocation.shape[0]):
+        for station_index in range(partition_allocation.shape[1]):
+            quantity = float(partition_allocation[pallet_index, station_index])
             if quantity > 1e-5:
                 partition_rows.append(
                     {
@@ -1401,43 +1336,70 @@ def solve_multi_period(
                     }
                 )
 
-    task1_summary, task1_routes, task1_workload, _ = solve_direct_delivery_scenario(
+    task1_allocation = build_nearest_allocation(demand, partition_costs)
+    task1_lanes, empty_cache_services = build_transport_lanes(
+        allocation=task1_allocation,
+        pallet_coords=pallet_coords,
+        workstations=data.workstations,
+        cache_positions=[],
+        use_cache=False,
+    )
+    partition_lanes, _ = build_transport_lanes(
+        allocation=partition_allocation,
+        pallet_coords=pallet_coords,
+        workstations=data.workstations,
+        cache_positions=[],
+        use_cache=False,
+    )
+    cache_lanes, cache_service_stations = build_transport_lanes(
+        allocation=partition_allocation,
+        pallet_coords=pallet_coords,
+        workstations=data.workstations,
+        cache_positions=selected_cache_positions,
+        use_cache=True,
+    )
+
+    task1_summary, task1_routes, task1_workload, _task1_snapshots, _ = simulate_transport_processing_scenario(
         scenario_name="task1_only",
         data=data,
         pallet_ids=pallet_ids,
-        pallet_coords=pallet_coords,
-        initial_demand=demand,
+        lanes=task1_lanes,
         initial_agv_positions=initial_agv_positions,
+        cache_global_indices=[],
+        cache_positions=[],
+        cache_service_stations=empty_cache_services,
         max_agvs=max_agvs,
         agv_capacity=agv_capacity,
         station_capacity=station_capacity,
+        cache_capacity=cache_capacity,
         max_rounds=max_rounds,
         verbose=verbose,
     )
-    partition_summary, partition_routes, partition_workload, _ = solve_direct_delivery_scenario(
+    partition_summary, partition_routes, partition_workload, _partition_snapshots, _ = simulate_transport_processing_scenario(
         scenario_name="task1_partition",
         data=data,
         pallet_ids=pallet_ids,
-        pallet_coords=pallet_coords,
-        initial_demand=demand,
+        lanes=partition_lanes,
         initial_agv_positions=initial_agv_positions,
-        primary_stations=primary_stations,
+        cache_global_indices=[],
+        cache_positions=[],
+        cache_service_stations=empty_cache_services,
         max_agvs=max_agvs,
         agv_capacity=agv_capacity,
         station_capacity=station_capacity,
+        cache_capacity=cache_capacity,
         max_rounds=max_rounds,
         verbose=verbose,
     )
-    cache_summary, cache_routes, cache_workload, cache_snapshots, cache_inventory = solve_partition_cache_scenario(
+    cache_summary, cache_routes, cache_workload, cache_snapshots, cache_inventory = simulate_transport_processing_scenario(
         scenario_name="task1_partition_cache",
         data=data,
         pallet_ids=pallet_ids,
-        pallet_coords=pallet_coords,
-        initial_demand=demand,
+        lanes=cache_lanes,
         initial_agv_positions=initial_agv_positions,
-        primary_stations=primary_stations,
         cache_global_indices=[int(idx) for idx in selected_cache_indices],
         cache_positions=selected_cache_positions,
+        cache_service_stations=cache_service_stations,
         max_agvs=max_agvs,
         agv_capacity=agv_capacity,
         station_capacity=station_capacity,
@@ -1473,10 +1435,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--sample-prob", type=float, default=0.6)
-    parser.add_argument("--max-agvs", type=int, default=12)
-    parser.add_argument("--agv-capacity", type=float, default=80.0)
+    parser.add_argument("--max-agvs", type=int, default=24)
+    parser.add_argument("--agv-capacity", type=float, default=120.0)
     parser.add_argument("--station-capacity", type=float, default=160.0)
     parser.add_argument("--cache-capacity", type=float, default=600.0)
+    parser.add_argument("--balance-alpha", type=float, default=1.15)
     parser.add_argument("--choose-count", type=int, default=10)
     parser.add_argument("--min-distance", type=int, default=6)
     parser.add_argument("--max-rounds", type=int, default=240)
@@ -1493,6 +1456,7 @@ def main() -> None:
         agv_capacity=args.agv_capacity,
         station_capacity=args.station_capacity,
         cache_capacity=args.cache_capacity,
+        balance_alpha=args.balance_alpha,
         choose_count=args.choose_count,
         min_distance=args.min_distance,
         max_rounds=args.max_rounds,

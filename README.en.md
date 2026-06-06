@@ -460,14 +460,16 @@ The ablation compares three increasingly rich settings:
 | --- | --- | --- | --- |
 | Task 1 only | AGV dispatching | choose AGV-pallet-workstation tasks by rolling distance | workstation |
 | Task 1 + dynamic partitioning | dispatching + workstation service areas | Task 2 first assigns each pallet to a primary workstation | assigned workstation |
-| Task 1 + dynamic partitioning + cache | dispatching + service areas + cache state | AGVs replenish cache points; workstations consume cache inventory | cache point or workstation |
+| Task 1 + dynamic partitioning + cache | dispatching + service areas + cache state | AGVs may replenish front-of-workstation cache points; the assigned workstation still processes the goods | cache point or workstation |
 
-Here, cache points are not modeled as mandatory extra AGV hops. They represent
-front-of-workstation staging or transfer buffers: AGVs perform the long-haul
-movement to a cache point, while the workstation side consumes inventory from
-that cache through local handling. Therefore the main metrics are **rounds to
-finish all demand** and **total AGV travel distance**. Cache-to-workstation
-local movement is recorded separately as an auxiliary metric.
+Here, cache points are not modeled as "goods no longer need workstations" or
+as mandatory extra AGV hops. They represent front-of-workstation staging or
+transfer buffers: AGVs perform the long-haul movement to a cache point, while
+the assigned workstation consumes inventory from that cache through local
+handling. Therefore all goods are still processed by workstations. The main
+metrics are **rounds to finish all demand** and **total AGV travel distance**.
+Cache-to-workstation local movement is recorded separately as an auxiliary
+metric.
 
 The rolling pipeline is:
 
@@ -484,11 +486,11 @@ Default data and parameters:
 - 675 order records from `orders.csv` are treated as the initial batch;
 - SKU demand is matched to 140 real pallets in `pallets.csv`, producing total
   demand 8478;
-- 12 AGVs participate, each carrying at most 80 units per round;
+- 24 AGVs participate, each carrying at most 120 units per round;
 - 18 workstations each process at most 160 units per round;
 - Task 3 selects 10 cache points, each with default capacity 600.
 
-The rolling process figure shows the full 16-round process for the third
+The rolling process figure shows the full 8-round process for the third
 setting:
 
 - blue triangles: AGV starting positions in the current round;
@@ -562,7 +564,7 @@ figures. `solve_multi_period.py` generates the rolling process figure.
 | Task 1 AGV assignment | LP relaxation plus integer recovery | Chapter 7 | primal-dual interior-point method | `algorithms/primal_dual_lp.py` |
 | Task 2 dynamic partitioning | linear programming | Chapter 7 | primal-dual interior-point method | `algorithms/primal_dual_lp.py` |
 | Task 3 cache/transfer location selection | spatially constrained 0-1 selection via continuous relaxation | Chapter 7 + Chapter 6 | quadratic penalty + projected BB gradient + repair | `algorithms/quadratic_penalty.py`, `algorithms/projected_bb_gradient.py` |
-| Multi-period rolling ablation | decomposed rolling completion under initial total demand | Chapter 7 + Chapter 6 | Task 1 dispatch LP + Task 2 partition LP + Task 3 cache selection + rolling cache inventory updates | `solve_multi_period.py` |
+| Multi-period rolling ablation | decomposed rolling completion under initial total demand | Chapter 7 + Chapter 6 | Task 1 dispatch LP + upper-balanced partition LP + primary-workstation repair + Task 3 cache selection + rolling cache inventory updates | `solve_multi_period.py` |
 
 ## 10. Results and Analysis
 
@@ -587,27 +589,28 @@ A typical `python solve_multi_period.py` run prints:
 
 ```text
 Rolling ablation optimization
-scenarios=3 route_records=620 time=3.957s
-[task1_only] rounds=15 agv_routes=173 agv_distance=3503.000 processed=8478.000 cached=0.000
-[task1_partition] rounds=15 agv_routes=174 agv_distance=3494.000 processed=8478.000 cached=0.000
-[task1_partition_cache] rounds=16 agv_routes=172 agv_distance=1751.000 processed=8478.000 cached=7185.000
-cache agv-distance saving vs partition=1743.000 (49.89%)
+scenarios=3 route_records=685 time=1.203s
+[task1_only] rounds=10 agv_routes=149 agv_distance=2899.000 processed=8478.000 cached=0.000
+[task1_partition] rounds=8 agv_routes=149 agv_distance=3322.000 processed=8478.000 cached=0.000
+[task1_partition_cache] rounds=8 agv_routes=149 agv_distance=2445.000 processed=8478.000 cached=4285.000
+cache agv-distance saving vs partition=877.000 (26.40%)
 ```
 
 The rolling result shows that all demand is fixed at the initial time. With the
-default parameters, Task 1 alone finishes in 15 rounds with total AGV distance
-3503. Adding dynamic partitioning keeps the completion time at 15 rounds and
-slightly reduces AGV distance to 3494. Adding cache points reduces the AGV
-long-haul distance to 1751, saving 1743 versus the partition setting
-(49.89%), but the cache inventory must still be consumed by workstations, so
-completion increases to 16 rounds.
+default parameters, Task 1 alone sends goods to nearby workstations and keeps
+AGV distance at 2899, but its workload is concentrated and some workstations
+queue, so completion takes 10 rounds. Adding dynamic partitioning imposes an
+upper workload balance on workstations: AGV distance increases to 3322, but
+completion decreases to 8 rounds. Adding cache points keeps completion at 8
+rounds and reduces AGV distance to 2445, saving 877 versus the partition
+setting (26.40%).
 
 This also explains why an earlier "force every item through cache and let AGVs
 move it again from cache to workstation" setup was worse: it split one item
 into two AGV trips. The current model treats cache points as front-of-line
 staging buffers, records local cache-to-workstation handling separately, and
-therefore captures the trade-off more realistically: less AGV travel, but
-possible inventory waiting.
+therefore captures the trade-off more realistically: less AGV travel while the
+goods still finish at workstations.
 
 Together, the three experiments show how one warehouse dataset can be turned
 into different optimization models across dispatching, service-area
