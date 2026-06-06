@@ -15,9 +15,40 @@ experiment setup, and result analysis.
 ## 1. Background, Entities, and Data
 
 In an automated warehouse, AGVs move pallets through a grid of aisles and
-nodes. The system needs more than vehicles that can move: it needs dispatching
-that avoids unnecessary travel, workstation service areas that keep workloads
-stable, and cache or transfer positions that do not become overly concentrated.
+nodes. Although this may look like simple point-to-point movement, AGV
+dispatching and warehouse layout directly affect transport cost, order
+processing speed, workstation waiting time, and local congestion.
+
+This project can be understood as a small intelligent warehouse decision
+system. Given a set of pallets, AGVs, and workstations, it answers three
+connected operational questions:
+
+- **Who should move the current batch of pallets?** For example, during a
+  shipping peak, 12 AGVs may be parked at different locations. Randomly
+  assigning vehicles can create unnecessary empty travel across the warehouse,
+  while optimized assignment sends nearby AGVs to more suitable pallets. This
+  corresponds to **Task 1: AGV assignment**.
+- **Which workstation should process which quantities?** If every pallet is
+  assigned only to its nearest workstation, one workstation may become
+  overloaded while others remain idle. Dynamic partitioning balances transport
+  distance and workstation workload. This corresponds to **Task 2: dynamic
+  partitioning**.
+- **Which locations should be used as cache or transfer points?** High-frequency
+  replenishment, pre-shipping staging, and workstation-side buffers need useful
+  locations. If those locations are too concentrated, AGVs may queue and block
+  local aisles. This corresponds to **Task 3: cache/transfer location
+  selection**.
+
+The practical value of the project is to convert warehouse operations into
+computable, reproducible, and explainable optimization models:
+
+- **lower transport cost** by reducing empty travel, detours, battery usage,
+  equipment wear, and manual intervention;
+- **higher operating efficiency** by shortening pickup and delivery paths;
+- **more stable workstation workload** by avoiding overloaded and idle stations;
+- **lower congestion risk** by spacing important cache/transfer locations;
+- **better management decisions** by explaining why vehicles, areas, and
+  locations are chosen.
 
 ![Background and data overview](figures/background_data_overview.png)
 
@@ -46,19 +77,69 @@ Distance is defined as:
 dist(a, b) = |x_a - x_b| + |y_a - y_b|
 ```
 
-The data files are:
+### Visual Color Rules
 
-| File | Contents | Role in the project |
+All README figures use a consistent visual language:
+
+| Meaning | Color in figures | Explanation |
 | --- | --- | --- |
-| `data/map.csv` | node type, node coordinates, workstation coordinates | builds the warehouse grid, reads workstations, and supports distance calculation |
-| `data/pallets.csv` | pallet coordinates, pallet ID, SKU:quantity lists | provides pallet positions, candidate locations, and pallet quantities |
-| `data/bots.csv` | AGV ID, current position, direction | provides AGV starting positions for Task 1 |
-| `data/orders.csv` | order ID, SKU, demand quantity, received time, deadline | represents the business-demand background; the current models optimize from pallet inventory and coordinates, and the order data can support later order-level dispatching |
+| AGV | blue triangle | vehicle position or vehicle starting point |
+| Pallet | green circle | existing pallet location; point size often represents quantity |
+| Workstation | red square | picking, packing, processing, inspection, or temporary handling point |
+| Candidate location | light-blue circle | candidate location in Task 3 |
+| Selected cache/transfer location | orange diamond | final selected location in Task 3 |
+| Pickup/delivery route | blue dashed line / orange solid line | AGV-to-pallet and pallet-to-workstation distance in Task 1 |
 
-In the default experiment, Task 1 uses a fixed random seed to sample 12
-available AGVs for one dispatching batch. The randomness only creates a
-reproducible experimental batch; it does not change the pallet, workstation, or
-map data.
+Task 2 uses an additional fixed categorical palette to show which workstation
+mainly serves each pallet. The workstation markers remain red, and the workload
+bars remain green.
+
+### Dataset Details
+
+The data are not generated on the fly. They are local warehouse CSV files under
+`data/`. Each run reads these files, builds coordinates, quantities, AGV
+positions, and demand context, and then constructs the optimization models.
+
+| File | Fields | Scale | Real-world meaning | Role in the model |
+| --- | --- | --- | --- | --- |
+| `data/map.csv` | `Type`, `X`, `Y`, `All_Car`, `Free_Car` | 704 map nodes, warehouse size 32 x 22, including 18 workstation nodes with type `5` | warehouse grid, aisles, storage nodes, charging nodes, connection nodes, and workstations | reads warehouse nodes and workstation coordinates; supports Manhattan distance calculation |
+| `data/pallets.csv` | `{SKU:Amount} List`, `X`, `Y`, `Pallet ID` | 140 pallets, total pallet quantity 8478, single-pallet quantity range 26 to 192 | current pallet inventory and storage distribution | provides pallet coordinates, pallet quantities, and Task 3 candidate locations |
+| `data/bots.csv` | `car_id`, `x`, `y`, `direction` | 50 AGV positions; the default experiment samples 12 AGVs for Task 1 | current vehicle state in the warehouse | provides AGV starting positions; direction is retained but not used by the current distance model |
+| `data/orders.csv` | `Order ID`, `SKU`, `Required Amount`, `Order Received Time`, `Deadline Time` | 675 order records, 181 unique SKUs, total demand 8478 | demand context explaining why inventory needs to be moved and processed | current models optimize from pallet inventory and coordinates; orders can support later order-level dispatching |
+
+The data relationships are:
+
+- `map.csv` describes warehouse space: where AGVs can move and where
+  workstations are located.
+- `pallets.csv` describes inventory state: where goods are stored and how much
+  quantity each pallet contains.
+- `bots.csv` describes fleet state: which AGVs can depart from which positions.
+- `orders.csv` describes demand context. Its total demand is 8478, matching the
+  total pallet quantity of 8478, so it explains the business scale of the
+  current inventory/demand batch.
+
+Data preprocessing includes:
+
+- skipping comment and description rows in CSV files;
+- parsing the `"SKU:quantity,SKU:quantity"` string in `pallets.csv` into a
+  dictionary and aggregating each pallet's total quantity `q(j)`;
+- reading nodes with type `5` in `map.csv` as workstation coordinates;
+- reading AGV coordinates from `bots.csv` and sampling 12 AGVs with a fixed
+  seed for a reproducible dispatching batch;
+- building AGV-pallet, pallet-workstation, and pallet-pallet distance matrices.
+
+The three tasks use the data differently:
+
+| Task | Data used | How the data enter the model |
+| --- | --- | --- |
+| Task 1 AGV assignment | `bots.csv`, `pallets.csv`, `map.csv` | AGV, pallet, and workstation coordinates define the two-stage route cost: `AGV -> pallet -> workstation` |
+| Task 2 dynamic partitioning | `pallets.csv`, `map.csv` | pallet quantities are supply amounts, and pallet-workstation distances are unit assignment costs |
+| Task 3 cache/transfer location selection | `pallets.csv`, `map.csv` | existing pallet/storage coordinates are candidate locations, and pallet-pallet distances define spatial conflict constraints |
+
+The only randomness in the default experiment is AGV sampling for Task 1. It
+represents the current dispatchable vehicle set. The warehouse map, pallet
+locations, pallet quantities, and order records all come from fixed CSV files,
+so the experiment is directly reproducible.
 
 ## 2. Project Content
 
