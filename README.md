@@ -1,7 +1,8 @@
-# AGV Warehouse Optimization without COPT
+# AGV Warehouse Optimization Course Project
 
-This repository is the reproducible no-COPT version of an AGV warehouse
-optimization course project. It follows the same narrative order as the
+This repository contains an AGV warehouse optimization course project built
+with local CSV data, automated model construction, and self-implemented
+textbook optimization algorithms. It follows the same narrative order as the
 presentation deck: warehouse background, task meaning, modeling, textbook
 algorithms, experiment setup, and result analysis.
 
@@ -217,7 +218,7 @@ warehouse_data.py         CSV reading and distance matrix construction
 solve_agv_assignment.py   Task 1 model builder and solver
 solve_dynamic_partition.py Task 2 model builder and solver
 solve_warehouse_layout.py Task 3 model builder and solver
-run_all_no_copt.py        one-click reproduction entry point
+run_all.py                one-click reproduction entry point
 results/                 generated CSV outputs
 scripts/                 presentation-data and HTML-deck helper scripts
 ```
@@ -238,7 +239,7 @@ CSV data -> distance matrices -> model matrices -> textbook algorithms -> CSV re
 
 ## 9. Result Summary
 
-Running `python run_all_no_copt.py` reproduces the three tasks. A typical run
+Running `python run_all.py` reproduces the three tasks. A typical run
 produces:
 
 ```text
@@ -260,7 +261,7 @@ The results show three different optimization layers:
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python run_all_no_copt.py
+python run_all.py
 ```
 
 You can also run each task separately:
@@ -271,7 +272,6 @@ python solve_dynamic_partition.py
 python solve_warehouse_layout.py
 ```
 
-Presentation deliverables, original COPT notebooks, local reference PDFs,
-virtual environments, and intermediate generated artifacts are intentionally
-excluded from the GitHub repository.
-
+Presentation deliverables, exploratory notebooks, local reference PDFs, virtual
+environments, and intermediate generated artifacts are intentionally excluded
+from the GitHub repository.

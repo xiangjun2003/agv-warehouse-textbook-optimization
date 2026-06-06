@@ -85,7 +85,7 @@ def main():
         verbose=args.verbose,
     )
     write_assignment(Path(args.output), z)
-    print("Dynamic partition without COPT")
+    print("Dynamic partition")
     print(f"pallets={len(data.pallets)} workstations={len(data.workstations)}")
     print(
         f"status={result.status} iterations={result.iterations} "

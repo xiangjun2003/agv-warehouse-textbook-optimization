@@ -1,2 +1,1 @@
-"""Textbook-style optimization algorithms used by the no-COPT solvers."""
-
+"""Textbook-style optimization algorithms used by the project solvers."""

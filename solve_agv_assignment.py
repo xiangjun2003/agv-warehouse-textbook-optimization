@@ -181,7 +181,7 @@ def main():
         verbose=args.verbose,
     )
     write_assignment(Path(args.output), assignments)
-    print("AGV assignment without COPT")
+    print("AGV assignment")
     print(
         f"agvs={len(data.agvs)} pallets={len(data.pallets)} "
         f"workstations={len(data.workstations)}"

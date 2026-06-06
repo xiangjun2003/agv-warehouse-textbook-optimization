@@ -128,8 +128,8 @@ def solve_warehouse_layout(
     x0 = np.full(n, choose_count / n, dtype=float) + 0.02 * rng.random(n)
     x0 = np.clip(x0, 0.0, 1.0)
 
-    # The original COPT model has a constant objective. A tiny score term only
-    # breaks ties among many feasible layouts.
+    # The base layout model has many equivalent feasible solutions. A tiny
+    # score term only breaks ties among feasible layouts.
     tie_break_weight = 1e-3
 
     def objective_grad(x: np.ndarray):
@@ -206,7 +206,7 @@ def main():
         verbose=args.verbose,
     )
     write_layout(Path(args.output), selected, data.pallets)
-    print("Warehouse layout without COPT")
+    print("Warehouse layout")
     print(f"pallets={len(data.pallets)} conflict_edges={len(edges)}")
     print(
         f"status={result.status} outer_iterations={result.outer_iterations} "

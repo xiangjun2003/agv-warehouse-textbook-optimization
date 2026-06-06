@@ -1,6 +1,6 @@
-# AGV 仓储优化项目：无 COPT 复现版
+# AGV 仓储优化课程项目
 
-这个仓库是 AGV 仓储优化课程项目的无 COPT 复现版。README 的结构按照演示 PPT 的讲述顺序展开：先讲实验背景和仓库实体，再讲三个任务的实际意义、建模方式、教材算法、实验设置和结果分析。
+这个仓库是一个独立的 AGV 仓储优化课程项目，使用本地 CSV 数据、自动化建模流程和我们自己实现的教材优化算法完成三个实验任务。README 的结构按照演示 PPT 的讲述顺序展开：先讲实验背景和仓库实体，再讲三个任务的实际意义、建模方式、教材算法、实验设置和结果分析。
 
 ## 1. 实验背景
 
@@ -199,7 +199,7 @@ warehouse_data.py          读取地图、托盘、AGV、工位，并构造距�
 solve_agv_assignment.py    任务 1：AGV 任务分配
 solve_dynamic_partition.py 任务 2：动态分区
 solve_warehouse_layout.py  任务 3：重点缓存货位选择
-run_all_no_copt.py         一键运行三个实验
+run_all.py                 一键运行三个实验
 results/                  输出 CSV 结果
 scripts/                  演示数据和 HTML 生成辅助脚本
 ```
@@ -223,7 +223,7 @@ CSV 数据 -> 距离矩阵 -> 目标向量/约束矩阵 -> 教材算法求解 ->
 运行：
 
 ```bash
-python run_all_no_copt.py
+python run_all.py
 ```
 
 典型输出为：
@@ -246,7 +246,7 @@ python run_all_no_copt.py
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python run_all_no_copt.py
+python run_all.py
 ```
 
 也可以分别运行三个任务：
@@ -257,5 +257,4 @@ python solve_dynamic_partition.py
 python solve_warehouse_layout.py
 ```
 
-当前 GitHub 仓库不包含演示稿 `deliverables/`、原始 COPT notebook、本地教材 PDF、虚拟环境和中间生成产物，只保留无 COPT 版本复现所需的代码、数据和结果。
-
+当前 GitHub 仓库不包含演示稿 `deliverables/`、探索性 notebook、本地教材 PDF、虚拟环境和中间生成产物，只保留课程项目运行所需的代码、数据和结果。
