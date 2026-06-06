@@ -44,4 +44,3 @@ Outputs are written to `results/`.
 
 The original COPT notebooks and local reference PDFs are intentionally excluded
 from the GitHub repository.
-
