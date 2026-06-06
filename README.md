@@ -366,10 +366,10 @@ pallet_index,x,y
 - `orders.csv` 中 675 条订单一次性作为初始需求；
 - 根据 `pallets.csv` 的 `{SKU:数量}` 匹配到 140 个真实托盘，形成总需求 8478 件；
 - 24 辆 AGV 参与滚动处理，每辆每轮最多搬运 120 件；
-- 18 个工位，每个工位每轮最多处理 160 件；
+- 18 个工位，每个工位每轮最多处理 80 件；
 - 任务 3 选出 10 个缓存点，每个缓存点容量默认为 600 件。
 
-滚动过程图展示的是第四组“任务 1 + 动态分区 + 缓存”的完整 9 轮过程：
+滚动过程图展示的是第四组“任务 1 + 动态分区 + 缓存”的完整 11 轮过程：
 
 - 蓝色三角形：该轮 AGV 起点。第 1 轮来自 `bots.csv`，后续轮次由上一轮 AGV 终点更新得到；
 - 浅绿色圆点：当前仍有剩余待处理货量的托盘；
@@ -463,16 +463,16 @@ python scripts/make_readme_figures.py
 
 ```text
 Rolling ablation optimization
-scenarios=4 route_records=997 time=1.310s
-[task1_only] rounds=10 agv_routes=149 agv_distance=2899.000 processed=8478.000 cached=0.000
-[task1_cache] rounds=12 agv_routes=197 agv_distance=2226.000 processed=8478.000 cached=5086.000
-[task1_partition] rounds=8 agv_routes=149 agv_distance=3322.000 processed=8478.000 cached=0.000
-[task1_partition_cache] rounds=9 agv_routes=177 agv_distance=3060.000 processed=8478.000 cached=2806.000
+scenarios=4 route_records=1151 time=1.548s
+[task1_only] rounds=19 agv_routes=149 agv_distance=2899.000 processed=8478.000 cached=0.000
+[task1_cache] rounds=20 agv_routes=197 agv_distance=2226.000 processed=8478.000 cached=5086.000
+[task1_partition] rounds=10 agv_routes=149 agv_distance=3322.000 processed=8478.000 cached=0.000
+[task1_partition_cache] rounds=11 agv_routes=177 agv_distance=3060.000 processed=8478.000 cached=2806.000
 cache-only agv-distance saving vs task1=673.000 (23.21%)
 cache agv-distance saving vs partition=262.000 (7.89%)
 ```
 
-这个结果可以看出：所有订单需求在初始时刻一次性给定，系统不是持续加货，而是每轮运输一部分剩余货量，同时工位以固定速度处理已经送达的队列。默认参数下，仅任务 1 选择近距离工位，AGV 总距离为 2899，但负载集中，部分工位排队，最终需要 10 轮；只加入缓存后，AGV 总距离降到 2226，比仅任务 1 节约 673，约 23.21%，但因为缓存入库和出库都占用 AGV，完成时间增加到 12 轮；加入动态分区后，任务 2 给工位总负载加了均衡上限，AGV 路线距离增加到 3322，但完成时间降到 8 轮；同时加入动态分区和缓存后，AGV 会额外执行 28 条 `缓存 -> 工位` 出库路线，完成时间为 9 轮，AGV 总距离为 3060，比动态分区方案节约 262，约 7.89%。
+这个结果可以看出：所有订单需求在初始时刻一次性给定，系统不是持续加货，而是每轮运输一部分剩余货量，同时工位以固定速度处理已经送达的队列。默认参数下，每个工位每轮只能处理 80 件。仅任务 1 选择近距离工位，AGV 总距离为 2899，但负载集中，最大工位需要处理 1448 件，因此完成时间增加到 19 轮；只加入缓存后，AGV 总距离降到 2226，比仅任务 1 节约 673，约 23.21%，但缓存入库和出库都占用 AGV，且工位负载仍然集中，完成时间为 20 轮；加入动态分区后，任务 2 给工位总负载加了均衡上限，最大工位负载降到约 541 件，完成时间降到 10 轮；同时加入动态分区和缓存后，AGV 会额外执行 28 条 `缓存 -> 工位` 出库路线，完成时间为 11 轮，AGV 总距离为 3060，比动态分区方案节约 262，约 7.89%。
 
 这个结论也说明缓存区不是一定同时降低距离和轮数。它的价值在于把部分远距离小批量直送改成“近距离入缓存 + 短距离批量补给”，从而减少 AGV 总行驶距离；代价是缓存出库也要占用 AGV 轮次。动态分区的价值则更偏向于均衡工位负载、缩短完成时间。因此缓存和动态分区解决的是两个不同方向的问题：一个偏距离，一个偏节奏。
 

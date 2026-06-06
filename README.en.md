@@ -500,10 +500,10 @@ Default data and parameters:
 - SKU demand is matched to 140 real pallets in `pallets.csv`, producing total
   demand 8478;
 - 24 AGVs participate, each carrying at most 120 units per round;
-- 18 workstations each process at most 160 units per round;
+- 18 workstations each process at most 80 units per round;
 - Task 3 selects 10 cache points, each with default capacity 600.
 
-The rolling process figure shows the full 9-round process for the fourth
+The rolling process figure shows the full 11-round process for the fourth
 setting:
 
 - blue triangles: AGV starting positions in the current round;
@@ -602,26 +602,28 @@ A typical `python solve_multi_period.py` run prints:
 
 ```text
 Rolling ablation optimization
-scenarios=4 route_records=997 time=1.310s
-[task1_only] rounds=10 agv_routes=149 agv_distance=2899.000 processed=8478.000 cached=0.000
-[task1_cache] rounds=12 agv_routes=197 agv_distance=2226.000 processed=8478.000 cached=5086.000
-[task1_partition] rounds=8 agv_routes=149 agv_distance=3322.000 processed=8478.000 cached=0.000
-[task1_partition_cache] rounds=9 agv_routes=177 agv_distance=3060.000 processed=8478.000 cached=2806.000
+scenarios=4 route_records=1151 time=1.548s
+[task1_only] rounds=19 agv_routes=149 agv_distance=2899.000 processed=8478.000 cached=0.000
+[task1_cache] rounds=20 agv_routes=197 agv_distance=2226.000 processed=8478.000 cached=5086.000
+[task1_partition] rounds=10 agv_routes=149 agv_distance=3322.000 processed=8478.000 cached=0.000
+[task1_partition_cache] rounds=11 agv_routes=177 agv_distance=3060.000 processed=8478.000 cached=2806.000
 cache-only agv-distance saving vs task1=673.000 (23.21%)
 cache agv-distance saving vs partition=262.000 (7.89%)
 ```
 
 The rolling result shows that all demand is fixed at the initial time. With the
-default parameters, Task 1 alone sends goods to nearby workstations and keeps
-AGV distance at 2899, but its workload is concentrated and some workstations
-queue, so completion takes 10 rounds. Adding cache alone reduces AGV distance
+default parameters, each workstation can process only 80 units per round. Task
+1 alone sends goods to nearby workstations and keeps AGV distance at 2899, but
+its workload is concentrated: the heaviest workstation processes 1448 units,
+so completion increases to 19 rounds. Adding cache alone reduces AGV distance
 to 2226, saving 673 versus Task 1 alone (23.21%), but inbound and outbound
-cache trips consume AGV rounds, so completion increases to 12 rounds. Adding
-dynamic partitioning imposes an upper workload balance on workstations: AGV
-distance increases to 3322, but completion decreases to 8 rounds. Adding both
-dynamic partitioning and cache creates 28 additional `cache -> workstation`
-AGV outbound routes and finishes in 9 rounds; AGV distance drops to 3060,
-saving 262 versus the partition setting (7.89%).
+cache trips consume AGV rounds and the workstation load remains concentrated,
+so completion is 20 rounds. Adding dynamic partitioning imposes an upper
+workload balance on workstations: the heaviest workstation load drops to about
+541 units, so completion decreases to 10 rounds. Adding both dynamic
+partitioning and cache creates 28 additional `cache -> workstation` AGV
+outbound routes and finishes in 11 rounds; AGV distance drops to 3060, saving
+262 versus the partition setting (7.89%).
 
 This result shows that cache points do not automatically reduce both distance
 and time. Their value is to replace some long small-batch direct deliveries

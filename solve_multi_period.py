@@ -1369,7 +1369,7 @@ def solve_multi_period(
     sample_prob: float = 0.6,
     max_agvs: int = 24,
     agv_capacity: float = 120.0,
-    station_capacity: float = 160.0,
+    station_capacity: float = 80.0,
     cache_capacity: float = 600.0,
     balance_alpha: float = 1.15,
     choose_count: int = 10,
@@ -1552,7 +1552,7 @@ def main() -> None:
     parser.add_argument("--sample-prob", type=float, default=0.6)
     parser.add_argument("--max-agvs", type=int, default=24)
     parser.add_argument("--agv-capacity", type=float, default=120.0)
-    parser.add_argument("--station-capacity", type=float, default=160.0)
+    parser.add_argument("--station-capacity", type=float, default=80.0)
     parser.add_argument("--cache-capacity", type=float, default=600.0)
     parser.add_argument("--balance-alpha", type=float, default=1.15)
     parser.add_argument("--choose-count", type=int, default=10)
