@@ -63,39 +63,39 @@ def solve_projected_gradient(
 
     for iteration in range(1, max_iter + 1):
         f_y, g_y = fun_grad(y)
-        projected = y - _project_box(y - g_y, lower_arr, upper_arr)
+        trial_step = step
+        while True:
+            x_new = _project_box(y - trial_step * g_y, lower_arr, upper_arr)
+            delta = x_new - y
+            f_new, g_new = fun_grad(x_new)
+            if f_new <= f_y + armijo * float(g_y @ delta) or trial_step <= step_min:
+                break
+            trial_step *= 0.5
+
+        projected = x_new - _project_box(x_new - g_new, lower_arr, upper_arr)
         pg_norm = float(np.linalg.norm(projected, ord=np.inf))
         history.append(
             {
                 "iteration": float(iteration),
-                "objective": float(f_y),
+                "objective": float(f_new),
                 "projected_gradient": pg_norm,
-                "step": step,
+                "step": trial_step,
             }
         )
         if verbose:
             print(
-                f"inner={iteration:04d} obj={f_y:.6g} "
-                f"pg={pg_norm:.2e} step={step:.2e}"
+                f"inner={iteration:04d} obj={f_new:.6g} "
+                f"pg={pg_norm:.2e} step={trial_step:.2e}"
             )
         if pg_norm <= tol:
             return ProjectedGradientResult(
-                x=y,
-                objective=float(f_y),
+                x=x_new,
+                objective=float(f_new),
                 status="optimal",
                 iterations=iteration,
                 projected_gradient=pg_norm,
                 history=history,
             )
-
-        trial_step = step
-        while True:
-            x_new = _project_box(y - trial_step * g_y, lower_arr, upper_arr)
-            delta = x_new - y
-            f_new, _ = fun_grad(x_new)
-            if f_new <= f_y + armijo * float(g_y @ delta) or trial_step <= step_min:
-                break
-            trial_step *= 0.5
 
         if accelerated:
             momentum_new = 0.5 * (1.0 + float(np.sqrt(1.0 + 4.0 * momentum * momentum)))

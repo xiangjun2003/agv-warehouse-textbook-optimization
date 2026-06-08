@@ -178,17 +178,19 @@ def benchmark_task2(alpha: float = 0.6) -> list[dict[str, Any]]:
         gap: float | None = None,
         notes: str = "",
     ) -> None:
-        z = np.maximum(0.0, x[:z_count].reshape(j_count, k_count))
-        loads = z.sum(axis=0)
-        transport_objective = float(np.sum(distances * z))
+        z_raw = x[:z_count].reshape(j_count, k_count)
+        z_repaired = np.maximum(0.0, z_raw)
+        loads = z_repaired.sum(axis=0)
+        raw_transport_objective = float(c @ x)
+        repaired_transport_objective = float(np.sum(distances * z_repaired))
         rows.append(
             _row(
                 task="task2_dynamic_partition",
                 algorithm=algorithm,
                 textbook_chapter=chapter,
                 status=status,
-                objective=transport_objective,
-                recovered_objective=transport_objective,
+                objective=raw_transport_objective,
+                recovered_objective=repaired_transport_objective,
                 iterations=iterations,
                 time_seconds=elapsed,
                 equality_residual=_relative_equality_residual(A, x, b),
@@ -196,7 +198,7 @@ def benchmark_task2(alpha: float = 0.6) -> list[dict[str, Any]]:
                 primal_residual=primal_residual if primal_residual is not None else "",
                 dual_residual=dual_residual if dual_residual is not None else "",
                 gap=gap if gap is not None else "",
-                selected_or_routes=int(np.count_nonzero(z > 1e-5)),
+                selected_or_routes=int(np.count_nonzero(z_repaired > 1e-5)),
                 min_load=float(np.min(loads)),
                 max_load=float(np.max(loads)),
                 notes=notes,

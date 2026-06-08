@@ -1,12 +1,12 @@
 task,algorithm,textbook_chapter,status,objective,recovered_objective,iterations,time_seconds,equality_residual,nonnegative_violation,primal_residual,dual_residual,gap,selected_or_routes,min_load,max_load,notes
-task1_agv_assignment,primal_dual_interior_point,Chapter 7,optimal,130.99996,131,13,0.26145308,4.8077283e-08,0,4.8077283e-08,7.642098e-17,4.6046262e-09,12,0,3,self implemented
-task1_agv_assignment,dual_simplex_highs,linear programming simplex baseline,optimal,131,131,568,0.025879375,0,0,,,,12,0,3,SciPy HiGHS dual simplex
-task1_agv_assignment,admm_affine_box,Chapter 8,max_iter,130.5968,131,1200,3.631309,0.0023080547,0,0.00025062347,0.010118813,,12,0,3,self implemented first-order splitting
-task2_dynamic_partition,primal_dual_interior_point,Chapter 7,optimal,79350.2,79350.2,21,0.045978541,6.0508339e-08,0,6.0508339e-08,5.9633224e-17,3.5430822e-08,403,282.6,1268.0351,self implemented
-task2_dynamic_partition,dual_simplex_highs,linear programming simplex baseline,optimal,79350.2,79350.2,309,0.006963708,7.8172138e-17,0,,,,151,282.6,1328,SciPy HiGHS dual simplex
-task2_dynamic_partition,admm_affine_box,Chapter 8,max_iter,83050.83,83050.83,1500,0.38536221,5.9539456e-05,0,1.0294892e-05,0.72909367,,485,282.61796,698.64454,self implemented first-order splitting
-task2_dynamic_partition,augmented_lagrangian_bb,Chapter 7 + Chapter 6,max_iter,81974.58,81974.58,6000,0.75231917,7.258701e-07,0,0.001003132,,,484,282.59997,726.61811,outer_iterations=12; self implemented
-task3_cache_location,quadratic_penalty_projected_bb,Chapter 7 + Chapter 6,optimal,-0.0031641608,5.1979167,2400,0.096381042,3.9425222e-06,0,3.9425222e-06,,,10,7,,outer_iterations=2; selected_min_distance>6
-task3_cache_location,quadratic_penalty_projected_gradient,Chapter 7 + Chapter 6,optimal,-0.0031660503,5.1979167,2400,0.19881625,6.6774555e-06,0,6.6774555e-06,,,10,7,,outer_iterations=2; selected_min_distance>6
-task3_cache_location,quadratic_penalty_nesterov,Chapter 7 + Chapter 8,optimal,-0.0031714342,5.1979167,2400,0.27777229,6.3708387e-06,0,6.3708387e-06,,,10,7,,outer_iterations=2; selected_min_distance>6
-task3_cache_location,augmented_lagrangian_projected_bb,Chapter 7 + Chapter 6,optimal,-0.0040736857,3.6666667,2000,0.087710792,6.750156e-14,0,6.750156e-14,,,10,7,,outer_iterations=2; selected_min_distance>6
+task1_agv_assignment,primal_dual_interior_point,Chapter 7,optimal,130.99996,131,13,0.28062071,4.8077283e-08,0,4.8077283e-08,7.642098e-17,4.6046262e-09,12,0,3,self implemented
+task1_agv_assignment,dual_simplex_highs,linear programming simplex baseline,optimal,131,131,568,0.024187709,0,0,,,,12,0,3,SciPy HiGHS dual simplex
+task1_agv_assignment,admm_affine_box,Chapter 8,max_iter,130.5968,131,1200,3.2525761,0.0023080547,0,0.00025062347,0.010118813,,12,0,3,self implemented first-order splitting
+task2_dynamic_partition,primal_dual_interior_point,Chapter 7,optimal,79350.2,79350.2,21,0.044493917,6.0508339e-08,0,6.0508339e-08,5.9633224e-17,3.5430822e-08,403,282.6,1268.0351,self implemented
+task2_dynamic_partition,dual_simplex_highs,linear programming simplex baseline,optimal,79350.2,79350.2,309,0.006732541,7.8172138e-17,0,,,,151,282.6,1328,SciPy HiGHS dual simplex
+task2_dynamic_partition,admm_affine_box,Chapter 8,max_iter,83050.83,83050.83,1500,0.42657817,5.9539456e-05,0,1.0294892e-05,0.72909367,,485,282.61796,698.64454,self implemented first-order splitting
+task2_dynamic_partition,augmented_lagrangian_bb,Chapter 7 + Chapter 6,max_iter,81974.58,81974.58,6000,1.1797977,7.258701e-07,0,0.001003132,,,484,282.59997,726.61811,outer_iterations=12; self implemented
+task3_cache_location,quadratic_penalty_projected_bb,Chapter 7 + Chapter 6,optimal,-0.0031641608,5.1979167,2400,0.13595071,3.9425222e-06,0,3.9425222e-06,,,10,7,,outer_iterations=2; selected_min_distance>6
+task3_cache_location,quadratic_penalty_projected_gradient,Chapter 7 + Chapter 6,optimal,-0.0031660503,5.1979167,2400,0.25926933,6.6774555e-06,0,6.6774555e-06,,,10,7,,outer_iterations=2; selected_min_distance>6
+task3_cache_location,quadratic_penalty_nesterov,Chapter 7 + Chapter 8,optimal,-0.0031714342,5.1979167,2400,0.32653867,6.3708387e-06,0,6.3708387e-06,,,10,7,,outer_iterations=2; selected_min_distance>6
+task3_cache_location,augmented_lagrangian_projected_bb,Chapter 7 + Chapter 6,optimal,-0.0040736857,3.6666667,2000,0.09156975,6.750156e-14,0,6.750156e-14,,,10,7,,outer_iterations=2; selected_min_distance>6
