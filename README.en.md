@@ -215,6 +215,7 @@ solve_agv_assignment.py        Task 1 model builder and solver
 solve_dynamic_partition.py     Task 2 model builder and solver
 solve_warehouse_layout.py      Task 3 model builder and solver
 run_all.py                     one-click entry point for the three base tasks
+run_algorithm_benchmarks.py    algorithm benchmark for Tasks 1/2/3
 results/                       generated CSV outputs
 scripts/make_readme_figures.py README figure generation script
 solve_multi_period.py          realistic order-processing scheduling experiment
@@ -592,6 +593,12 @@ python solve_warehouse_layout.py
 python solve_multi_period.py
 ```
 
+The algorithm benchmark for Tasks 1/2/3 can be run with:
+
+```bash
+python run_algorithm_benchmarks.py
+```
+
 README figures can be regenerated with:
 
 ```bash
@@ -609,6 +616,16 @@ figures. `solve_multi_period.py` generates the realistic process figure.
 | Task 2 dynamic partitioning | linear programming | Chapter 7 | primal-dual interior-point method | `algorithms/primal_dual_lp.py` |
 | Task 3 cache/transfer location selection | spatially constrained 0-1 selection via continuous relaxation | Chapter 7 + Chapter 6 | quadratic penalty + projected BB gradient + repair | `algorithms/quadratic_penalty.py`, `algorithms/projected_bb_gradient.py` |
 | Realistic order-processing scheduling experiment | decomposed round-by-round completion under initial total demand | Chapter 7 + Chapter 6 | Task 1 dispatch LP + upper-balanced partition LP + primary-workstation repair + Task 3 cache selection + cache inventory updates by round | `solve_multi_period.py` |
+
+The algorithm benchmark also uses:
+
+| Algorithm | Textbook link | Code | Role |
+| --- | --- | --- | --- |
+| Augmented Lagrangian + projected BB | Chapter 7 + Chapter 6 | `algorithms/augmented_lagrangian.py` | approximate LP solving for Task 2 and constrained layout relaxation for Task 3 |
+| ADMM | Chapter 8 | `algorithms/admm_lp.py` | splitting method for Task 1/2 LPs |
+| Projected gradient | Chapter 6 | `algorithms/projected_gradient.py` | Task 3 penalty subproblems |
+| Nesterov accelerated projected gradient | Chapter 8 | `algorithms/projected_gradient.py` | Task 3 penalty subproblems |
+| HiGHS dual simplex | classical LP baseline | SciPy `linprog(method="highs-ds")` | library baseline for Task 1/2; simplex is not developed in detail in the textbook |
 
 ## 10. Results and Analysis
 
@@ -628,6 +645,53 @@ Interpretation:
   cost 79350.2, while keeping each workstation above the minimum workload.
 - **Task 3** outputs 10 selected cache/transfer positions with minimum pairwise
   distance 7, satisfying the spacing requirement.
+
+### Algorithm Benchmark For Tasks 1/2/3
+
+Running `python run_algorithm_benchmarks.py` writes:
+
+```text
+results/algorithm_benchmark.csv
+```
+
+The benchmark compares algorithms on the same models. `objective` is the
+continuous relaxation objective, while `recovered_objective` is the executable
+route cost or repaired layout score. Smaller `equality_residual` means better
+constraint satisfaction. ADMM and augmented Lagrangian are run under fixed
+iteration budgets; a `max_iter` status therefore means an approximate solution,
+not a certified optimum.
+
+Task 1: AGV assignment.
+
+| Algorithm | Status | LP objective | Recovered route cost | Iterations | Time | Equality residual | Interpretation |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Primal-dual interior point | optimal | 131.000 | 131.000 | 13 | 0.261s | 4.81e-08 | self-implemented main solver; accurate and stable after integer recovery |
+| HiGHS dual simplex | optimal | 131.000 | 131.000 | 568 | 0.026s | 0 | fast library LP baseline |
+| ADMM | max_iter | 130.597 | 131.000 | 1200 | 3.631s | 2.31e-03 | still has feasibility residual, so its continuous objective is below the true optimum; recovery still gives route cost 131 |
+
+Task 2: dynamic partitioning.
+
+| Algorithm | Status | Objective | Nonzero flows | Iterations | Time | Equality residual | Interpretation |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Primal-dual interior point | optimal | 79350.2 | 403 | 21 | 0.046s | 6.05e-08 | accurate high-precision LP solve |
+| HiGHS dual simplex | optimal | 79350.2 | 151 | 309 | 0.007s | 7.82e-17 | reaches the same optimum and returns a sparser vertex solution |
+| ADMM | max_iter | 83050.8 | 485 | 1500 | 0.385s | 5.95e-05 | nearly feasible but still above the optimum |
+| Augmented Lagrangian + BB | max_iter | 81974.6 | 484 | 6000 | 0.752s | 7.26e-07 | better feasibility and objective than ADMM, but still not as accurate as IPM/simplex |
+
+Task 3: cache/transfer location selection.
+
+| Algorithm | Status | Relaxed objective | Layout score | Iterations | Time | Selected | Min distance | Interpretation |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| Quadratic penalty + projected BB | optimal | -0.003164 | 5.198 | 2400 | 0.096s | 10 | 7 | default solver; fast and produces a feasible repaired layout |
+| Quadratic penalty + projected gradient | optimal | -0.003166 | 5.198 | 2400 | 0.199s | 10 | 7 | same repaired layout quality, but slower than BB |
+| Quadratic penalty + Nesterov | optimal | -0.003171 | 5.198 | 2400 | 0.278s | 10 | 7 | acceleration does not help much here because projection and penalties dominate |
+| Augmented Lagrangian + projected BB | optimal | -0.004074 | 3.667 | 2000 | 0.088s | 10 | 7 | satisfies continuous constraints well, but repair gives a lower-scoring discrete layout |
+
+Overall, Tasks 1/2 show that interior-point and simplex methods are the most
+suitable high-accuracy LP solvers. ADMM and augmented Lagrangian are useful
+lightweight approximations, but need more iterations to approach the optimum.
+For Task 3, quadratic penalty with projected BB gives the best balance between
+speed and repaired discrete solution quality, so it remains the default.
 
 A typical `python solve_multi_period.py` run prints:
 

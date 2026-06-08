@@ -113,6 +113,7 @@ def solve_warehouse_layout(
     choose_count: int = 10,
     min_distance: int = 6,
     seed: int = 0,
+    inner_solver: str = "bb",
     verbose: bool = False,
 ):
     data = load_data(agv_sample_prob=None)
@@ -159,6 +160,7 @@ def solve_warehouse_layout(
         rho_multiplier=8.0,
         outer_iter=7,
         inner_iter=1200,
+        inner_solver=inner_solver,
         tol=1e-5,
         verbose=verbose,
     )
@@ -195,6 +197,7 @@ def main():
     parser.add_argument("--choose-count", type=int, default=10)
     parser.add_argument("--min-distance", type=int, default=6)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--inner-solver", choices=["bb", "pg", "nesterov"], default="bb")
     parser.add_argument("--output", default="results/warehouse_layout.csv")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
@@ -203,6 +206,7 @@ def main():
         choose_count=args.choose_count,
         min_distance=args.min_distance,
         seed=args.seed,
+        inner_solver=args.inner_solver,
         verbose=args.verbose,
     )
     write_layout(Path(args.output), selected, data.pallets)

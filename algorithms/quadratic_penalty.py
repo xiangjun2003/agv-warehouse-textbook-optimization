@@ -6,6 +6,7 @@ from typing import Callable
 import numpy as np
 
 from .projected_bb_gradient import solve_projected_bb
+from .projected_gradient import solve_projected_gradient
 
 
 Array = np.ndarray
@@ -37,6 +38,7 @@ def solve_quadratic_penalty(
     rho_multiplier: float = 10.0,
     outer_iter: int = 6,
     inner_iter: int = 1000,
+    inner_solver: str = "bb",
     tol: float = 1e-5,
     verbose: bool = False,
 ) -> PenaltyResult:
@@ -60,15 +62,41 @@ def solve_quadratic_penalty(
             grad = base_grad + rho * jacobian_transpose(z, h, g_pos)
             return float(value), grad
 
-        inner = solve_projected_bb(
-            penalty_fun_grad,
-            x,
-            lower=lower,
-            upper=upper,
-            max_iter=inner_iter,
-            tol=max(tol / max(rho, 1.0), 1e-8),
-            verbose=False,
-        )
+        inner_tol = max(tol / max(rho, 1.0), 1e-8)
+        if inner_solver == "bb":
+            inner = solve_projected_bb(
+                penalty_fun_grad,
+                x,
+                lower=lower,
+                upper=upper,
+                max_iter=inner_iter,
+                tol=inner_tol,
+                verbose=False,
+            )
+        elif inner_solver == "pg":
+            inner = solve_projected_gradient(
+                penalty_fun_grad,
+                x,
+                lower=lower,
+                upper=upper,
+                max_iter=inner_iter,
+                tol=inner_tol,
+                accelerated=False,
+                verbose=False,
+            )
+        elif inner_solver == "nesterov":
+            inner = solve_projected_gradient(
+                penalty_fun_grad,
+                x,
+                lower=lower,
+                upper=upper,
+                max_iter=inner_iter,
+                tol=inner_tol,
+                accelerated=True,
+                verbose=False,
+            )
+        else:
+            raise ValueError(f"unknown inner_solver {inner_solver!r}")
         x = inner.x
         h, g = residuals(x)
         eq_violation = float(np.linalg.norm(h, ord=np.inf)) if h.size else 0.0
