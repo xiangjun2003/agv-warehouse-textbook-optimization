@@ -216,6 +216,7 @@ solve_dynamic_partition.py     Task 2 model builder and solver
 solve_warehouse_layout.py      Task 3 model builder and solver
 run_all.py                     one-click entry point for the three base tasks
 run_algorithm_benchmarks.py    algorithm benchmark for Tasks 1/2/3
+run_parameter_analysis.py      parameter sensitivity experiment for textbook algorithms
 results/                       generated CSV outputs
 scripts/make_readme_figures.py README figure generation script
 solve_multi_period.py          realistic order-processing scheduling experiment
@@ -697,6 +698,51 @@ lightweight approximations, but need more iterations to approach the optimum.
 For Task 3, quadratic penalty with projected BB gives the best balance between
 speed and repaired discrete solution quality, so it remains the default.
 
+### Parameter Sensitivity Analysis
+
+The algorithm benchmark answers which methods are usable. The parameter
+sensitivity experiment asks how the same method behaves when its key textbook
+parameters change. Run:
+
+```bash
+python run_parameter_analysis.py
+```
+
+It writes:
+
+```text
+results/algorithm_parameter_sweep.csv
+figures/algorithm_parameter_sweep.png
+```
+
+This script reads the existing `results/algorithm_benchmark.csv` as the
+reference baseline and does not rerun the previous benchmark table. The swept
+parameters are the ones with direct algorithmic meaning:
+
+- ADMM `rho`: balances the linear objective, box projection, and equality
+  projection;
+- augmented Lagrangian `rho0`: controls the initial constraint penalty;
+- quadratic penalty `rho0` and `rho_multiplier`: control how strong the penalty
+  is initially and how fast it grows between outer iterations;
+- inner iteration budgets are kept fixed, so differences mainly reflect
+  parameter effects on convergence speed and recovered solution quality.
+
+![Algorithm parameter sensitivity analysis](figures/algorithm_parameter_sweep.png)
+
+Main observations:
+
+| Experiment | Parameter range | Representative result | Interpretation |
+| --- | --- | --- | --- |
+| Task 1 ADMM | `rho = 5, 10, 25, 50, 100` | all settings recover route cost `131`; equality residual improves from `1.76e-2` to about `1.21e-3` at best | integer recovery is stable; `rho` mainly changes continuous feasibility rather than final route cost |
+| Task 2 ADMM | `rho = 10, 20, 35, 70, 120` | `rho=10` has transport-cost gap about `+980`, while `rho=120` worsens to about `+12432` | under a fixed 1500-iteration budget, too large a `rho` overemphasizes projection and worsens the objective |
+| Task 2 augmented Lagrangian | `rho0 = 0.25, 0.5, 1, 2, 4` | `rho0=0.25` has cost gap about `+1145` but larger residual; `rho0=2` reaches `optimal` but cost gap is about `+5491` | stronger initial penalty improves feasibility faster, but does not necessarily minimize transport cost within the same budget |
+| Task 3 quadratic penalty | `rho0 = 1, 3, 10, 30`; `rho_multiplier = 2, 4, 8, 12` | most settings recover score `5.198`; `rho0=1` or `rho_multiplier=4` drops to `3.667` | continuous feasibility is easy, but the repaired discrete layout can depend on the penalty path; the default `rho0=10, rho_multiplier=8` balances speed and quality |
+
+The takeaway is that first-order splitting and penalty methods are not
+automatically good after implementation. They are easy to code and interpret,
+but under fixed iteration budgets, parameters materially affect convergence,
+constraint residuals, and the quality of the recovered executable plan.
+
 A typical `python solve_multi_period.py` run prints:
 
 ```text
@@ -986,8 +1032,10 @@ The current experiment has several limitations:
   operator effort, service radius, and cache congestion are not modeled.
 - **Dynamic partitioning is solved only at `t=0`**: workstation service areas
   are not recalculated as queues and inventories change.
-- **Limited sensitivity analysis**: AGV count, AGV capacity, workstation
-  capacity, cache capacity, and cache count can all change the conclusion.
+- **Realistic-setting sensitivity is still limited**: the project now includes
+  textbook algorithm parameter analysis, but AGV count, AGV capacity,
+  workstation capacity, cache capacity, and cache count can also change the
+  realistic scheduling conclusion.
 
 ## 13. Reproduce
 
@@ -997,6 +1045,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 python run_all.py
 python solve_multi_period.py
+python run_parameter_analysis.py
 ```
 
 Presentation deliverables, exploratory notebooks, local reference PDFs,
